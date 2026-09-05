@@ -47,6 +47,7 @@ def calculate_payload(payload: dict[str, Any]) -> dict[str, Any]:
         },
         "summaries": [asdict(row) for row in result.summaries],
         "periods": [asdict(row) for row in result.periods],
+        "signals": [asdict(row) for row in result.signals],
         "trades": [asdict(row) for row in result.trades],
         "issues": list(result.issues),
     }
@@ -72,7 +73,7 @@ def fetch_eodhd_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 class KellyRequestHandler(BaseHTTPRequestHandler):
-    server_version = "KellyMVP/0.3"
+    server_version = "KellyMVP/0.4"
 
     def _send_bytes(self, status: int, content_type: str, body: bytes) -> None:
         self.send_response(status)
@@ -88,6 +89,7 @@ class KellyRequestHandler(BaseHTTPRequestHandler):
             value,
             ensure_ascii=False,
             separators=(",", ":"),
+            allow_nan=False,
             default=lambda item: item.isoformat() if isinstance(item, date) else str(item),
         ).encode("utf-8")
         self._send_bytes(status, "application/json; charset=utf-8", body)

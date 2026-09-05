@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from datetime import date
-from math import isfinite
+from math import expm1, isfinite, log
 from statistics import fmean, pstdev
 from typing import Iterable
 
@@ -24,7 +24,12 @@ class PeriodResult:
     return_date: date
     window_start_date: date
     window_end_date: date
+    raw_kelly: float
     full_kelly: float
+    exact_full_kelly: float
+    exact_kelly_gap: float
+    exact_objective_loss: float | None
+    optimizer_location: str
     position: float
     previous_position: float
     position_change: float
@@ -38,9 +43,31 @@ class PeriodResult:
     cost_rate: float
     gross_return: float
     net_return: float
+    log_growth: float | None
     wealth: float
     buy_hold_wealth: float
     bankrupt: bool
+    segment: str
+
+
+@dataclass(frozen=True, slots=True)
+class SignalResult:
+    symbol: str
+    frequency: str
+    signal_date: date
+    window_start_date: date
+    window_end_date: date
+    raw_kelly: float
+    full_kelly: float
+    exact_full_kelly: float
+    exact_kelly_gap: float
+    exact_objective_loss: float | None
+    optimizer_location: str
+    position: float
+    previous_position: float
+    position_change: float
+    turnover: float
+    evaluation_status: str
     segment: str
 
 
@@ -49,16 +76,17 @@ class TradeResult:
     symbol: str
     frequency: str
     signal_date: date
-    return_date: date
+    return_date: date | None
     action: str
     previous_position: float
     target_position: float
     position_change: float
     turnover: float
     cost_rate: float
-    next_return: float
-    net_return: float
-    wealth_after: float
+    next_return: float | None
+    net_return: float | None
+    wealth_after: float | None
+    evaluation_status: str
     segment: str
 
 
@@ -75,6 +103,8 @@ class SummaryResult:
     direction_accuracy: float | None
     total_return: float
     annualized_return: float
+    average_log_growth: float | None
+    annualized_log_growth: float | None
     buy_hold_return: float
     excess_return: float
     max_drawdown: float
@@ -82,6 +112,9 @@ class SummaryResult:
     sharpe_zero_rf: float | None
     average_abs_position: float
     average_turnover: float
+    mean_abs_exact_kelly_gap: float
+    exact_direction_agreement: float | None
+    boundary_rate: float
     bankruptcies: int
     transaction_cost_bps: float
 
@@ -89,6 +122,7 @@ class SummaryResult:
 @dataclass(frozen=True, slots=True)
 class BacktestResult:
     periods: tuple[PeriodResult, ...]
+    signals: tuple[SignalResult, ...]
     trades: tuple[TradeResult, ...]
     summaries: tuple[SummaryResult, ...]
     issues: tuple[str, ...]
@@ -101,6 +135,9 @@ class BacktestResult:
 
     def trade_dicts(self) -> list[dict[str, object]]:
         return [asdict(row) for row in self.trades]
+
+    def signal_dicts(self) -> list[dict[str, object]]:
+        return [asdict(row) for row in self.signals]
 
 
 def classify_trade(previous: float, target: float, tolerance: float = 1e-12) -> str | None:
@@ -156,8 +193,23 @@ def _summary(rows: list[PeriodResult], segment: str, window: int, cost_bps: floa
     total = _compound(net)
     annualizer = PERIODS_PER_YEAR[chosen[0].frequency]
     annualized = (1 + total) ** (annualizer / n) - 1 if n and total > -1 else -1.0
+    log_growth_values = [row.log_growth for row in chosen if row.log_growth is not None]
+    average_log_growth = (
+        fmean(log_growth_values) if len(log_growth_values) == n else None
+    )
+    try:
+        annualized_log_growth = (
+            expm1(average_log_growth * annualizer)
+            if average_log_growth is not None else -1.0
+        )
+    except OverflowError:
+        annualized_log_growth = None
     volatility = pstdev(net) * annualizer**0.5 if n > 1 else 0.0
     mean = fmean(net) * annualizer if n else 0.0
+    diagnostic = [
+        row for row in chosen
+        if abs(row.full_kelly) > 1e-12 and abs(row.exact_full_kelly) > 1e-12
+    ]
     return SummaryResult(
         symbol=chosen[0].symbol,
         frequency=chosen[0].frequency,
@@ -170,6 +222,8 @@ def _summary(rows: list[PeriodResult], segment: str, window: int, cost_bps: floa
         direction_accuracy=correct / len(directional) if directional else None,
         total_return=total,
         annualized_return=annualized,
+        average_log_growth=average_log_growth,
+        annualized_log_growth=annualized_log_growth,
         buy_hold_return=_compound(benchmark),
         excess_return=total - _compound(benchmark),
         max_drawdown=_drawdown(net),
@@ -177,6 +231,12 @@ def _summary(rows: list[PeriodResult], segment: str, window: int, cost_bps: floa
         sharpe_zero_rf=mean / volatility if volatility > 0 else None,
         average_abs_position=fmean(abs(row.position) for row in chosen),
         average_turnover=fmean(row.turnover for row in chosen),
+        mean_abs_exact_kelly_gap=fmean(abs(row.exact_kelly_gap) for row in chosen),
+        exact_direction_agreement=(
+            sum(row.full_kelly * row.exact_full_kelly > 0 for row in diagnostic) / len(diagnostic)
+            if diagnostic else None
+        ),
+        boundary_rate=sum(row.optimizer_location != "interior" for row in chosen) / n,
         bankruptcies=sum(row.bankrupt for row in chosen),
         transaction_cost_bps=cost_bps,
     )
@@ -185,6 +245,7 @@ def _summary(rows: list[PeriodResult], segment: str, window: int, cost_bps: floa
 def run_backtest(daily_prices: Iterable[PriceRow], config: StrategyConfig | None = None) -> BacktestResult:
     active = config or StrategyConfig()
     periods: list[PeriodResult] = []
+    signals: list[SignalResult] = []
     issues: list[str] = []
     for symbol, symbol_prices in split_by_symbol(daily_prices).items():
         for frequency in FREQUENCIES:
@@ -200,17 +261,45 @@ def run_backtest(daily_prices: Iterable[PriceRow], config: StrategyConfig | None
             split_index = max(1, min(available - 1, round(available * active.development_fraction)))
             wealth = benchmark_wealth = 1.0
             previous_position = 0.0
-            for evaluation_index, return_index in enumerate(range(window, len(returns))):
-                sample = returns[return_index - window:return_index]
+            for evaluation_index, signal_index in enumerate(range(window, len(returns) + 1)):
+                sample = returns[signal_index - window:signal_index]
                 decision = choose_position(
                     sample,
                     lower=active.lower_bound,
                     upper=active.upper_bound,
                     fraction=active.kelly_fraction,
                 )
-                next_return = returns[return_index]
                 turnover = abs(decision.position - previous_position)
                 position_change = decision.position - previous_position
+                evaluated = signal_index < len(returns)
+                segment = (
+                    "pending" if not evaluated
+                    else "development" if evaluation_index < split_index
+                    else "holdout"
+                )
+                signals.append(SignalResult(
+                    symbol=symbol,
+                    frequency=frequency,
+                    signal_date=prices[signal_index].date,
+                    window_start_date=prices[signal_index - window].date,
+                    window_end_date=prices[signal_index].date,
+                    raw_kelly=decision.raw_kelly,
+                    full_kelly=decision.full_kelly,
+                    exact_full_kelly=decision.exact_full_kelly,
+                    exact_kelly_gap=decision.full_kelly - decision.exact_full_kelly,
+                    exact_objective_loss=decision.exact_objective_loss,
+                    optimizer_location=decision.optimizer_location,
+                    position=decision.position,
+                    previous_position=previous_position,
+                    position_change=position_change,
+                    turnover=turnover,
+                    evaluation_status="evaluated" if evaluated else "pending",
+                    segment=segment,
+                ))
+                if not evaluated:
+                    previous_position = decision.position
+                    continue
+                next_return = returns[signal_index]
                 cost_rate = turnover * active.transaction_cost_bps / 10_000
                 gross_multiplier = 1 + decision.position * next_return
                 net_multiplier = gross_multiplier * (1 - cost_rate)
@@ -218,6 +307,7 @@ def run_backtest(daily_prices: Iterable[PriceRow], config: StrategyConfig | None
                 net_multiplier = max(0.0, net_multiplier) if isfinite(net_multiplier) else 0.0
                 gross_return = gross_multiplier - 1
                 net_return = net_multiplier - 1
+                log_growth = log(net_multiplier) if net_multiplier > 0 else None
                 wealth *= net_multiplier
                 benchmark_wealth *= max(0.0, 1 + next_return)
                 direction = (
@@ -229,11 +319,16 @@ def run_backtest(daily_prices: Iterable[PriceRow], config: StrategyConfig | None
                 periods.append(PeriodResult(
                     symbol=symbol,
                     frequency=frequency,
-                    signal_date=prices[return_index].date,
-                    return_date=prices[return_index + 1].date,
-                    window_start_date=prices[return_index - window].date,
-                    window_end_date=prices[return_index].date,
+                    signal_date=prices[signal_index].date,
+                    return_date=prices[signal_index + 1].date,
+                    window_start_date=prices[signal_index - window].date,
+                    window_end_date=prices[signal_index].date,
+                    raw_kelly=decision.raw_kelly,
                     full_kelly=decision.full_kelly,
+                    exact_full_kelly=decision.exact_full_kelly,
+                    exact_kelly_gap=decision.full_kelly - decision.exact_full_kelly,
+                    exact_objective_loss=decision.exact_objective_loss,
+                    optimizer_location=decision.optimizer_location,
                     position=decision.position,
                     previous_position=previous_position,
                     position_change=position_change,
@@ -247,32 +342,38 @@ def run_backtest(daily_prices: Iterable[PriceRow], config: StrategyConfig | None
                     cost_rate=cost_rate,
                     gross_return=gross_return,
                     net_return=net_return,
+                    log_growth=log_growth,
                     wealth=wealth,
                     buy_hold_wealth=benchmark_wealth,
                     bankrupt=bankrupt,
-                    segment="development" if evaluation_index < split_index else "holdout",
+                    segment=segment,
                 ))
                 previous_position = decision.position
     summaries: list[SummaryResult] = []
+    period_lookup = {
+        (row.symbol, row.frequency, row.signal_date): row for row in periods
+    }
     trades = tuple(
         TradeResult(
-            symbol=row.symbol,
-            frequency=row.frequency,
-            signal_date=row.signal_date,
-            return_date=row.return_date,
+            symbol=signal.symbol,
+            frequency=signal.frequency,
+            signal_date=signal.signal_date,
+            return_date=period.return_date if period else None,
             action=action,
-            previous_position=row.previous_position,
-            target_position=row.position,
-            position_change=row.position_change,
-            turnover=row.turnover,
-            cost_rate=row.cost_rate,
-            next_return=row.next_return,
-            net_return=row.net_return,
-            wealth_after=row.wealth,
-            segment=row.segment,
+            previous_position=signal.previous_position,
+            target_position=signal.position,
+            position_change=signal.position_change,
+            turnover=signal.turnover,
+            cost_rate=signal.turnover * active.transaction_cost_bps / 10_000,
+            next_return=period.next_return if period else None,
+            net_return=period.net_return if period else None,
+            wealth_after=period.wealth if period else None,
+            evaluation_status=signal.evaluation_status,
+            segment=signal.segment,
         )
-        for row in periods
-        if (action := classify_trade(row.previous_position, row.position)) is not None
+        for signal in signals
+        if (action := classify_trade(signal.previous_position, signal.position)) is not None
+        for period in [period_lookup.get((signal.symbol, signal.frequency, signal.signal_date))]
     )
     grouped: dict[tuple[str, str], list[PeriodResult]] = {}
     for row in periods:
@@ -282,4 +383,4 @@ def run_backtest(daily_prices: Iterable[PriceRow], config: StrategyConfig | None
             selected = rows if segment == "all" else [row for row in rows if row.segment == segment]
             if selected:
                 summaries.append(_summary(rows, segment, active.windows[frequency], active.transaction_cost_bps))
-    return BacktestResult(tuple(periods), trades, tuple(summaries), tuple(issues))
+    return BacktestResult(tuple(periods), tuple(signals), trades, tuple(summaries), tuple(issues))

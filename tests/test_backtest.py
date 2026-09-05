@@ -47,6 +47,10 @@ class BacktestTests(unittest.TestCase):
         first_trade = next(row for row in result.trades if row.frequency == "daily")
         self.assertEqual(first_trade.action, "open_long")
         self.assertAlmostEqual(first_trade.target_position, first.position)
+        daily_signals = [row for row in result.signals if row.frequency == "daily"]
+        self.assertEqual(daily_signals[-1].signal_date, rows[-1].date)
+        self.assertEqual(daily_signals[-1].evaluation_status, "pending")
+        self.assertEqual(len(daily_signals), len(daily) + 1)
 
     def test_zero_realized_return_is_not_forced_into_accuracy_denominator(self):
         start = date(2020, 1, 1)
@@ -67,6 +71,26 @@ class BacktestTests(unittest.TestCase):
             row for row in result.summaries if row.frequency == "daily" and row.segment == "all"
         )
         self.assertEqual(summary.direction_observations, summary.active_observations - 1)
+        self.assertGreaterEqual(summary.mean_abs_exact_kelly_gap, 0)
+        self.assertGreaterEqual(summary.boundary_rate, 0)
+        self.assertLessEqual(summary.boundary_rate, 1)
+
+    def test_bankruptcy_does_not_turn_log_zero_into_a_finite_number(self):
+        start = date(2020, 1, 1)
+        rows = [PriceRow(start, "X", 100.0)]
+        for index in range(1, 61):
+            rows.append(PriceRow(start + timedelta(days=index), "X", rows[-1].adjusted_close * 0.99))
+        rows.append(PriceRow(start + timedelta(days=61), "X", rows[-1].adjusted_close * 3))
+        result = run_backtest(rows)
+        daily = [row for row in result.periods if row.frequency == "daily"]
+        self.assertEqual(len(daily), 1)
+        self.assertTrue(daily[0].bankrupt)
+        self.assertIsNone(daily[0].log_growth)
+        summary = next(
+            row for row in result.summaries if row.frequency == "daily" and row.segment == "all"
+        )
+        self.assertIsNone(summary.average_log_growth)
+        self.assertEqual(summary.annualized_log_growth, -1.0)
 
     def test_summary_contains_development_holdout_and_all(self):
         start = date(2010, 1, 1)

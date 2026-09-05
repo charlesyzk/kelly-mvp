@@ -172,6 +172,7 @@ function escapeHtml(value) {
 }
 function pct(value) { return value == null ? "—" : `${(value * 100).toFixed(2)}%`; }
 function number(value, digits = 2) { return value == null ? "—" : Number(value).toFixed(digits); }
+function bps(value) { return value == null ? "—" : `${(Number(value) * 10000).toFixed(2)} bps`; }
 function frequencyName(value) { return ({ daily: "日频", weekly: "周频", monthly: "月频" })[value]; }
 function signedPct(value) {
   if (value == null) return "—";
@@ -213,7 +214,7 @@ function render() {
 }
 
 function visiblePeriods(frequency = state.tradeFrequency) {
-  let rows = state.result.periods.filter((row) => row.symbol === state.symbol && row.frequency === frequency);
+  let rows = state.result.signals.filter((row) => row.symbol === state.symbol && row.frequency === frequency);
   if (state.segment !== "all") rows = rows.filter((row) => row.segment === state.segment);
   return rows;
 }
@@ -292,10 +293,26 @@ function renderTradeTable() {
   $("#trade-next").disabled = state.tradePage >= pages - 1;
   $("#trade-table-body").innerHTML = pageRows.length ? pageRows.map((row) => {
     const directionClass = row.position_change > 0 ? "increase" : "decrease";
+    const pending = row.evaluation_status === "pending";
     return `<tr><td>${escapeHtml(row.signal_date)}</td><td><span class="action-tag ${directionClass}">${escapeHtml(tradeActionName(row.action))}</span></td>
       <td>${pct(row.previous_position)}</td><td>${pct(row.target_position)}</td><td class="${directionClass}">${signedPct(row.position_change)}</td>
-      <td>${pct(row.cost_rate)}</td><td>${escapeHtml(row.return_date)}</td><td class="${row.net_return >= 0 ? "increase" : "decrease"}">${signedPct(row.net_return)}</td></tr>`;
-  }).join("") : '<tr><td colspan="8" class="table-empty">当前区间没有非零仓位变化</td></tr>';
+      <td>${pct(row.cost_rate)}</td><td><span class="evaluation-tag ${pending ? "pending" : "evaluated"}">${pending ? "待验证" : "已评价"}</span></td>
+      <td>${pending ? "—" : escapeHtml(row.return_date)}</td><td class="${pending ? "" : row.net_return >= 0 ? "increase" : "decrease"}">${pending ? "—" : signedPct(row.net_return)}</td></tr>`;
+  }).join("") : '<tr><td colspan="9" class="table-empty">当前区间没有非零仓位变化</td></tr>';
+}
+
+function renderDiagnostics() {
+  const summary = state.result.summaries.find((row) => row.symbol === state.symbol && row.frequency === state.tradeFrequency && row.segment === state.segment);
+  const items = summary ? [
+    ["单期平均对数增长", bps(summary.average_log_growth)],
+    ["对数增长年化", pct(summary.annualized_log_growth)],
+    ["M4 / 精确仓位平均差", pct(summary.mean_abs_exact_kelly_gap)],
+    ["两者方向一致率", pct(summary.exact_direction_agreement)],
+    ["M4 触及边界比例", pct(summary.boundary_rate)],
+  ] : [];
+  $("#strategy-diagnostics").innerHTML = items.length
+    ? items.map(([label, value]) => `<div><span>${label}</span><strong>${value}</strong></div>`).join("")
+    : '<p class="diagnostic-empty">当前频率与区间没有可评价诊断数据。</p>';
 }
 
 function renderPositionWorkbench() {
@@ -305,9 +322,12 @@ function renderPositionWorkbench() {
   $("#position-chart").innerHTML = renderPositionChart(rows);
   $("#change-chart").innerHTML = renderChangeChart(rows);
   const latest = rows[rows.length - 1];
-  $("#position-caption").textContent = latest ? `最新 ${pct(latest.position)} · ${latest.signal_date}` : "无记录";
+  $("#position-caption").textContent = latest
+    ? `最新 ${pct(latest.position)} · ${latest.signal_date}${latest.evaluation_status === "pending" ? " · 待验证" : ""}`
+    : "无记录";
   const maxChange = rows.length ? Math.max(...rows.map((row) => Math.abs(row.position_change))) : 0;
   $("#change-caption").textContent = `${trades.length.toLocaleString("zh-CN")} 笔 · 最大变动 ${pct(maxChange)}`;
+  renderDiagnostics();
   renderTradeTable();
 }
 
@@ -344,5 +364,6 @@ function downloadCsv(rows, filename) {
   link.download = filename; link.click(); URL.revokeObjectURL(link.href);
 }
 $("#download-summary").addEventListener("click", () => downloadCsv(state.result.summaries, "kelly_summary.csv"));
+$("#download-signals").addEventListener("click", () => downloadCsv(state.result.signals, "kelly_signals.csv"));
 $("#download-periods").addEventListener("click", () => downloadCsv(state.result.periods, "kelly_periods.csv"));
 $("#download-trades").addEventListener("click", () => downloadCsv(state.result.trades, "kelly_trades.csv"));

@@ -65,7 +65,7 @@ def build_eodhd_url(
 
 
 def _default_transport(url: str, timeout_seconds: float) -> object:
-    request = Request(url, headers={"User-Agent": "kelly-mvp/0.3"})
+    request = Request(url, headers={"User-Agent": "kelly-mvp/0.4"})
     with urlopen(request, timeout=timeout_seconds) as response:  # nosec B310
         raw = response.read(MAX_RESPONSE_BYTES + 1)
     if len(raw) > MAX_RESPONSE_BYTES:

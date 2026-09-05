@@ -20,13 +20,15 @@ class ReportTests(unittest.TestCase):
         config = StrategyConfig(windows={"daily": 5, "weekly": 2, "monthly": 2})
         result = run_backtest(rows, config)
         with tempfile.TemporaryDirectory() as directory:
-            summary, periods, trades, report = write_outputs(result, directory)
+            summary, periods, signals, trades, report = write_outputs(result, directory)
             self.assertTrue(summary.is_file())
             self.assertTrue(periods.is_file())
             self.assertTrue(trades.is_file())
+            self.assertTrue(signals.is_file())
             self.assertIn("Rolling-60 M4 Kelly", report.read_text(encoding="utf-8"))
             self.assertIn("direction_accuracy", summary.read_text(encoding="utf-8-sig"))
             self.assertIn("position_change", trades.read_text(encoding="utf-8-sig"))
+            self.assertIn("pending", signals.read_text(encoding="utf-8-sig"))
 
 
 if __name__ == "__main__":

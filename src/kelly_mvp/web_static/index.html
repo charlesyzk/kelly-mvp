@@ -119,6 +119,11 @@
             </div>
           </header>
 
+          <section class="diagnostic-band" aria-label="Kelly目标与近似误差诊断">
+            <header><b>M4 与经验精确 Kelly 诊断</b><span>精确解仅作对照，不改变实际交易仓位</span></header>
+            <div id="strategy-diagnostics" class="diagnostic-grid"></div>
+          </section>
+
           <div class="position-panels">
             <article class="tape-card">
               <header><b>目标仓位曲线</b><span id="position-caption"></span></header>
@@ -139,7 +144,7 @@
             </header>
             <div class="table-scroll">
               <table>
-                <thead><tr><th>信号日</th><th>操作</th><th>原仓位</th><th>目标仓位</th><th>变动</th><th>成本</th><th>下一期</th><th>净收益</th></tr></thead>
+                <thead><tr><th>信号日</th><th>操作</th><th>原仓位</th><th>目标仓位</th><th>变动</th><th>成本</th><th>状态</th><th>下一期</th><th>净收益</th></tr></thead>
                 <tbody id="trade-table-body"></tbody>
               </table>
             </div>
@@ -153,6 +158,7 @@
 
         <div class="download-row">
           <button id="download-summary" type="button">下载摘要 CSV</button>
+          <button id="download-signals" type="button">下载仓位信号 CSV</button>
           <button id="download-periods" type="button">下载逐期明细 CSV</button>
           <button id="download-trades" type="button">下载调仓流水 CSV</button>
         </div>
@@ -165,9 +171,9 @@
           <article><em>1</em><h3>生成三种频率</h3><p>日线直接使用；周线和月线取每个完整周期最后一条复权价格。不能确认完整的最后一周或最后一月会被舍弃。</p></article>
           <article><em>2</em><h3>计算收益</h3><code>Rₜ = Pₜ / Pₜ₋₁ − 1</code><p>日、周、月各自独立计算，不跨频率拼接。</p></article>
           <article><em>3</em><h3>滚动四阶矩</h3><code>qₖ = (1/60) Σ Rᵢᵏ，k=1…4</code><p>假设下一期收益的前四阶矩与最近 60 期相同。这是估计假设，不是已知事实。</p></article>
-          <article><em>4</em><h3>求 Full Kelly</h3><code>G₄(f)=q₁f−q₂f²/2+q₃f³/3−q₄f⁴/4</code><p>求使 G₄ 最大的 f，并限制在 −1 到 +1。</p></article>
+          <article><em>4</em><h3>求解并检查近似</h3><code>G₄(f)=q₁f−q₂f²/2+q₃f³/3−q₄f⁴/4</code><p>实际仓位仍由 M4 求解；同时计算经验精确 Kelly，只用来量化 Taylor 截断误差。</p></article>
           <article><em>5</em><h3>降低并记录仓位</h3><code>Δf = 本期目标仓位 − 上期目标仓位</code><p>实际仓位是 Kelly 比例乘以 Full Kelly；每次非零 Δf 形成一条模拟调仓记录。</p></article>
-          <article><em>6</em><h3>用下一期验算</h3><code>M=(1+fRₜ₊₁)(1−成本×换手)</code><p>方向准确率只统计仓位和真实收益均非零的时期；同时计算收益、买入持有、回撤和换手。</p></article>
+          <article><em>6</em><h3>用下一期验算</h3><code>log增长 = log(M)，M &gt; 0</code><p>方向准确率只统计有方向的时期；若财富归零，单期对数增长显示为空而非伪造有限值。最新一期没有未来收益时保留为“待验证”。</p></article>
         </div>
       </details>
     </section>

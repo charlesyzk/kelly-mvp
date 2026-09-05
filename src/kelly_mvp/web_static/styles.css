@@ -146,6 +146,15 @@ select { border: 1px solid var(--grid); background: white; padding: 0 34px 0 12p
 .frequency-tabs { display: flex; gap: 3px; padding: 3px; background: #e2e8ec; }
 .frequency-tabs button { min-height: 34px; padding: 0 14px; border: 0; background: transparent; color: var(--muted); cursor: pointer; font-size: 10px; }
 .frequency-tabs button.active { background: var(--ink); color: white; }
+.diagnostic-band { margin-bottom: 12px; border: 1px solid var(--grid); background: #edf3f7; }
+.diagnostic-band > header { padding: 12px 16px; display: flex; justify-content: space-between; gap: 14px; border-bottom: 1px solid var(--grid); }
+.diagnostic-band > header b { font-size: 11px; }.diagnostic-band > header span { color: var(--muted); font-size: 9px; }
+.diagnostic-grid { display: grid; grid-template-columns: repeat(5, 1fr); }
+.diagnostic-grid div { min-width: 0; padding: 13px 15px; border-right: 1px solid var(--grid); }
+.diagnostic-grid div:last-child { border-right: 0; }
+.diagnostic-grid span { display: block; min-height: 26px; color: var(--muted); font-size: 8px; line-height: 1.45; }
+.diagnostic-grid strong { display: block; margin-top: 5px; color: var(--ink); font: 700 12px Menlo, monospace; }
+.diagnostic-empty { grid-column: 1 / -1; margin: 0; padding: 18px; color: var(--muted); font-size: 10px; }
 .position-panels { display: grid; gap: 12px; }
 .tape-card { padding: 16px 18px 12px; border: 1px solid var(--grid); background: white; }
 .tape-card > header { display: flex; align-items: baseline; justify-content: space-between; gap: 14px; }
@@ -175,6 +184,8 @@ select { border: 1px solid var(--grid); background: white; padding: 0 34px 0 12p
 .trade-ledger tbody tr:hover { background: #f7f9fa; }
 .action-tag { display: inline-block; min-width: 48px; padding: 4px 6px; text-align: center; font: 9px "PingFang SC", sans-serif; }
 .action-tag.increase { color: #08655d; background: #dff3ef; }.action-tag.decrease { color: #91461f; background: #f9e7dc; }
+.evaluation-tag { display: inline-block; padding: 3px 6px; font: 9px "PingFang SC", sans-serif; }
+.evaluation-tag.evaluated { color: #526372; background: #edf1f3; }.evaluation-tag.pending { color: #74551a; background: #fbefcf; }
 .trade-ledger td.increase { color: #08655d; }.trade-ledger td.decrease { color: #a34d25; }
 .table-empty { padding: 34px !important; text-align: center !important; color: var(--muted); font-family: inherit !important; }
 .table-pager { padding: 10px 14px; display: flex; justify-content: flex-end; align-items: center; gap: 12px; border-top: 1px solid var(--grid); color: var(--muted); font-size: 9px; }
@@ -193,11 +204,11 @@ footer { max-width: 1440px; margin: 0 auto; padding: 0 52px 42px; color: var(--m
 
 @media (max-width: 1050px) {
   .masthead { grid-template-columns: 110px 1fr; }.privacy { grid-column: 2; margin-top: -20px; }
-  .workspace { grid-template-columns: 280px minmax(0,1fr); }.metric-cards, .charts { grid-template-columns: 1fr; }.method-grid { grid-template-columns: 1fr 1fr; }.method-grid article:nth-child(3n) { border-right: 1px solid var(--grid); }.method-grid article:nth-child(2n) { border-right: 0; }
+  .workspace { grid-template-columns: 280px minmax(0,1fr); }.metric-cards, .charts { grid-template-columns: 1fr; }.diagnostic-grid { grid-template-columns: repeat(2, 1fr); }.diagnostic-grid div { border-bottom: 1px solid var(--grid); }.diagnostic-grid div:nth-child(2n) { border-right: 0; }.method-grid { grid-template-columns: 1fr 1fr; }.method-grid article:nth-child(3n) { border-right: 1px solid var(--grid); }.method-grid article:nth-child(2n) { border-right: 0; }
 }
 @media (max-width: 900px) {
   .masthead { padding: 30px 18px 24px; grid-template-columns: 1fr; }.brand span, .brand strong { font-size: 48px; }.brand i { font-size: 36px; }.privacy { grid-column: 1; margin: 0; }
-  .workspace { padding: 0 18px 54px; grid-template-columns: 1fr; }.control-panel { position: static; }.logic-heading, .result-toolbar, .workbench-heading { align-items: flex-start; flex-direction: column; }.logic-caption { margin-left: 0; }.results { padding: 18px; }.segment-tabs, .frequency-tabs { width: 100%; }.segment-tabs button, .frequency-tabs button { flex: 1; padding: 0 4px; }.method-grid { grid-template-columns: 1fr; }.method-grid article, .method-grid article:nth-child(3n) { border-right: 0; }.download-row { flex-direction: column; }.download-row button { width: 100%; }.mast-copy h1 { font-size: 43px; }.tape-card { padding: 14px 10px 10px; }.wide-chart { min-height: 150px; }.trade-ledger > header { align-items: flex-start; }.table-pager { justify-content: space-between; } footer { padding: 0 18px 30px; text-align: left; }
+  .workspace { padding: 0 18px 54px; grid-template-columns: 1fr; }.control-panel { position: static; }.logic-heading, .result-toolbar, .workbench-heading, .diagnostic-band > header { align-items: flex-start; flex-direction: column; }.logic-caption { margin-left: 0; }.results { padding: 18px; }.segment-tabs, .frequency-tabs { width: 100%; }.segment-tabs button, .frequency-tabs button { flex: 1; padding: 0 4px; }.diagnostic-grid { grid-template-columns: 1fr 1fr; }.method-grid { grid-template-columns: 1fr; }.method-grid article, .method-grid article:nth-child(3n) { border-right: 0; }.download-row { flex-direction: column; }.download-row button { width: 100%; }.mast-copy h1 { font-size: 43px; }.tape-card { padding: 14px 10px 10px; }.wide-chart { min-height: 150px; }.trade-ledger > header { align-items: flex-start; }.table-pager { justify-content: space-between; } footer { padding: 0 18px 30px; text-align: left; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; }

@@ -17,6 +17,8 @@ class WebTests(unittest.TestCase):
         self.assertIn("仓位与调仓轨迹", html)
         self.assertIn("模拟逐笔调仓", html)
         self.assertIn("下载调仓流水 CSV", html)
+        self.assertIn("M4 与经验精确 Kelly 诊断", html)
+        self.assertIn("下载仓位信号 CSV", html)
 
     @patch("kelly_mvp.web.fetch_daily_prices")
     def test_eodhd_payload_becomes_strategy_csv(self, fetch):
@@ -43,7 +45,9 @@ class WebTests(unittest.TestCase):
         frequencies = {row["frequency"] for row in result["summaries"]}
         self.assertEqual(frequencies, {"daily", "weekly", "monthly"})
         self.assertTrue(result["periods"])
+        self.assertTrue(result["signals"])
         self.assertTrue(result["trades"])
+        self.assertTrue(any(row["evaluation_status"] == "pending" for row in result["signals"]))
 
 
 if __name__ == "__main__":
