@@ -7,7 +7,7 @@ from dataclasses import fields
 from html import escape
 from pathlib import Path
 
-from .backtest import BacktestResult, PeriodResult, SummaryResult
+from .backtest import BacktestResult, PeriodResult, SummaryResult, TradeResult
 
 
 def _write_dataclasses(path: Path, rows: tuple[object, ...], row_type: type) -> None:
@@ -78,16 +78,18 @@ svg{{width:100%;height:180px;background:#fafcf8}} polyline{{fill:none;stroke-wid
 <h2>核心结果（全区间）</h2><table><thead><tr><th>标的</th><th>频率</th><th>样本</th><th>方向准确率</th><th>累计收益</th><th>年化收益</th><th>买入持有</th><th>最大回撤</th><th>平均换手</th></tr></thead><tbody>{body_rows}</tbody></table>
 <h2>净值曲线</h2><div class="charts">{''.join(charts)}</div>
 <h2>数据问题</h2><ul>{issues}</ul>
-<p>开发段/保留段的完整指标见 summary.csv；逐期复算数据见 periods.csv。</p></body></html>"""
+<p>开发段/保留段的完整指标见 summary.csv；逐期复算数据见 periods.csv；仓位发生变化的模拟调仓记录见 trades.csv。</p></body></html>"""
 
 
-def write_outputs(result: BacktestResult, output_dir: str | Path) -> tuple[Path, Path, Path]:
+def write_outputs(result: BacktestResult, output_dir: str | Path) -> tuple[Path, Path, Path, Path]:
     target = Path(output_dir)
     target.mkdir(parents=True, exist_ok=True)
     summary = target / "summary.csv"
     periods = target / "periods.csv"
+    trades = target / "trades.csv"
     report = target / "report.html"
     _write_dataclasses(summary, result.summaries, SummaryResult)
     _write_dataclasses(periods, result.periods, PeriodResult)
+    _write_dataclasses(trades, result.trades, TradeResult)
     report.write_text(_html(result), encoding="utf-8")
-    return summary, periods, report
+    return summary, periods, trades, report

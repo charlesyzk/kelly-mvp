@@ -26,6 +26,8 @@ class PeriodResult:
     window_end_date: date
     full_kelly: float
     position: float
+    previous_position: float
+    position_change: float
     q1: float
     q2: float
     q3: float
@@ -39,6 +41,24 @@ class PeriodResult:
     wealth: float
     buy_hold_wealth: float
     bankrupt: bool
+    segment: str
+
+
+@dataclass(frozen=True, slots=True)
+class TradeResult:
+    symbol: str
+    frequency: str
+    signal_date: date
+    return_date: date
+    action: str
+    previous_position: float
+    target_position: float
+    position_change: float
+    turnover: float
+    cost_rate: float
+    next_return: float
+    net_return: float
+    wealth_after: float
     segment: str
 
 
@@ -69,6 +89,7 @@ class SummaryResult:
 @dataclass(frozen=True, slots=True)
 class BacktestResult:
     periods: tuple[PeriodResult, ...]
+    trades: tuple[TradeResult, ...]
     summaries: tuple[SummaryResult, ...]
     issues: tuple[str, ...]
 
@@ -77,6 +98,29 @@ class BacktestResult:
 
     def summary_dicts(self) -> list[dict[str, object]]:
         return [asdict(row) for row in self.summaries]
+
+    def trade_dicts(self) -> list[dict[str, object]]:
+        return [asdict(row) for row in self.trades]
+
+
+def classify_trade(previous: float, target: float, tolerance: float = 1e-12) -> str | None:
+    """Describe a target-position change without inventing execution details."""
+
+    if abs(target - previous) <= tolerance:
+        return None
+    previous_is_zero = abs(previous) <= tolerance
+    target_is_zero = abs(target) <= tolerance
+    if previous_is_zero:
+        return "open_long" if target > 0 else "open_short"
+    if target_is_zero:
+        return "close_long" if previous > 0 else "close_short"
+    if previous > 0 and target < 0:
+        return "reverse_to_short"
+    if previous < 0 and target > 0:
+        return "reverse_to_long"
+    if previous > 0:
+        return "add_long" if target > previous else "reduce_long"
+    return "add_short" if target < previous else "cover_short"
 
 
 def _returns(prices: list[PriceRow]) -> list[float]:
@@ -166,6 +210,7 @@ def run_backtest(daily_prices: Iterable[PriceRow], config: StrategyConfig | None
                 )
                 next_return = returns[return_index]
                 turnover = abs(decision.position - previous_position)
+                position_change = decision.position - previous_position
                 cost_rate = turnover * active.transaction_cost_bps / 10_000
                 gross_multiplier = 1 + decision.position * next_return
                 net_multiplier = gross_multiplier * (1 - cost_rate)
@@ -190,6 +235,8 @@ def run_backtest(daily_prices: Iterable[PriceRow], config: StrategyConfig | None
                     window_end_date=prices[return_index].date,
                     full_kelly=decision.full_kelly,
                     position=decision.position,
+                    previous_position=previous_position,
+                    position_change=position_change,
                     q1=moments.q1,
                     q2=moments.q2,
                     q3=moments.q3,
@@ -207,6 +254,26 @@ def run_backtest(daily_prices: Iterable[PriceRow], config: StrategyConfig | None
                 ))
                 previous_position = decision.position
     summaries: list[SummaryResult] = []
+    trades = tuple(
+        TradeResult(
+            symbol=row.symbol,
+            frequency=row.frequency,
+            signal_date=row.signal_date,
+            return_date=row.return_date,
+            action=action,
+            previous_position=row.previous_position,
+            target_position=row.position,
+            position_change=row.position_change,
+            turnover=row.turnover,
+            cost_rate=row.cost_rate,
+            next_return=row.next_return,
+            net_return=row.net_return,
+            wealth_after=row.wealth,
+            segment=row.segment,
+        )
+        for row in periods
+        if (action := classify_trade(row.previous_position, row.position)) is not None
+    )
     grouped: dict[tuple[str, str], list[PeriodResult]] = {}
     for row in periods:
         grouped.setdefault((row.symbol, row.frequency), []).append(row)
@@ -215,4 +282,4 @@ def run_backtest(daily_prices: Iterable[PriceRow], config: StrategyConfig | None
             selected = rows if segment == "all" else [row for row in rows if row.segment == segment]
             if selected:
                 summaries.append(_summary(rows, segment, active.windows[frequency], active.transaction_cost_bps))
-    return BacktestResult(tuple(periods), tuple(summaries), tuple(issues))
+    return BacktestResult(tuple(periods), trades, tuple(summaries), tuple(issues))

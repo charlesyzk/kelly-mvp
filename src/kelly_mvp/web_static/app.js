@@ -1,4 +1,7 @@
-const state = { csvText: "", filename: "", result: null, symbol: "", segment: "all" };
+const state = {
+  csvText: "", filename: "", result: null, symbol: "", segment: "all",
+  tradeFrequency: "daily", tradePage: 0, tradePageSize: 20,
+};
 
 const $ = (selector) => document.querySelector(selector);
 const fileInput = $("#file-input");
@@ -128,6 +131,8 @@ runButton.addEventListener("click", async () => {
     state.result = data;
     const symbols = [...new Set(data.summaries.map((row) => row.symbol))];
     state.symbol = symbols[0];
+    state.tradeFrequency = "daily";
+    state.tradePage = 0;
     $("#symbol-select").innerHTML = symbols.map((symbol) => `<option>${escapeHtml(symbol)}</option>`).join("");
     $("#empty-state").hidden = true;
     $("#results").hidden = false;
@@ -144,12 +149,23 @@ runButton.addEventListener("click", async () => {
   }
 });
 
-$("#symbol-select").addEventListener("change", (event) => { state.symbol = event.target.value; render(); });
+$("#symbol-select").addEventListener("change", (event) => {
+  state.symbol = event.target.value; state.tradePage = 0; render();
+});
 document.querySelectorAll(".segment-tabs button").forEach((button) => button.addEventListener("click", () => {
   state.segment = button.dataset.segment;
+  state.tradePage = 0;
   document.querySelectorAll(".segment-tabs button").forEach((item) => item.classList.toggle("active", item === button));
   render();
 }));
+document.querySelectorAll("#trade-frequency-tabs button").forEach((button) => button.addEventListener("click", () => {
+  state.tradeFrequency = button.dataset.frequency;
+  state.tradePage = 0;
+  document.querySelectorAll("#trade-frequency-tabs button").forEach((item) => item.classList.toggle("active", item === button));
+  renderPositionWorkbench();
+}));
+$("#trade-prev").addEventListener("click", () => { state.tradePage -= 1; renderTradeTable(); });
+$("#trade-next").addEventListener("click", () => { state.tradePage += 1; renderTradeTable(); });
 
 function escapeHtml(value) {
   return String(value).replace(/[&<>'"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[char]));
@@ -157,6 +173,18 @@ function escapeHtml(value) {
 function pct(value) { return value == null ? "—" : `${(value * 100).toFixed(2)}%`; }
 function number(value, digits = 2) { return value == null ? "—" : Number(value).toFixed(digits); }
 function frequencyName(value) { return ({ daily: "日频", weekly: "周频", monthly: "月频" })[value]; }
+function signedPct(value) {
+  if (value == null) return "—";
+  const numeric = Number(value);
+  return `${numeric > 0 ? "+" : ""}${(numeric * 100).toFixed(2)}%`;
+}
+function tradeActionName(value) {
+  return ({
+    open_long: "开多", open_short: "开空", close_long: "平多", close_short: "平空",
+    add_long: "加多", reduce_long: "减多", add_short: "加空", cover_short: "减空",
+    reverse_to_long: "反手做多", reverse_to_short: "反手做空",
+  })[value] || value;
+}
 
 function render() {
   if (!state.result) return;
@@ -178,9 +206,109 @@ function render() {
       </div></article>`;
   }).join("");
   $("#charts").innerHTML = frequencies.map((frequency) => chartCard(frequency)).join("");
+  renderPositionWorkbench();
   const warnings = state.result.issues.filter((issue) => issue.startsWith(`${state.symbol}/`));
   $("#warnings").hidden = warnings.length === 0;
   $("#warnings").innerHTML = warnings.map((warning) => `<div>${escapeHtml(warning)}</div>`).join("");
+}
+
+function visiblePeriods(frequency = state.tradeFrequency) {
+  let rows = state.result.periods.filter((row) => row.symbol === state.symbol && row.frequency === frequency);
+  if (state.segment !== "all") rows = rows.filter((row) => row.segment === state.segment);
+  return rows;
+}
+
+function dateLabels(rows, width, left, right, y) {
+  if (!rows.length) return "";
+  const indices = [...new Set([0, Math.floor((rows.length - 1) / 2), rows.length - 1])];
+  const span = width - left - right;
+  return indices.map((index) => {
+    const x = left + (index / Math.max(1, rows.length - 1)) * span;
+    const anchor = index === 0 ? "start" : index === rows.length - 1 ? "end" : "middle";
+    return `<text x="${x.toFixed(1)}" y="${y}" text-anchor="${anchor}" class="axis-label">${escapeHtml(rows[index].signal_date)}</text>`;
+  }).join("");
+}
+
+function renderPositionChart(rows) {
+  if (!rows.length) return '<div class="chart-empty">当前区间没有仓位记录</div>';
+  const width = 760, height = 228, left = 48, right = 18, top = 18, bottom = 34;
+  const plotWidth = width - left - right, plotHeight = height - top - bottom;
+  const x = (index) => left + index / Math.max(1, rows.length - 1) * plotWidth;
+  const y = (value) => top + (1 - (Number(value) + 1) / 2) * plotHeight;
+  const path = rows.map((row, index) => `${index ? "L" : "M"}${x(index).toFixed(2)},${y(row.position).toFixed(2)}`).join(" ");
+  const last = rows[rows.length - 1];
+  return `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="目标仓位随时间变化，零线上方为做多，下方为做空">
+    <defs><linearGradient id="position-gradient" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#2858cc"/><stop offset="49.5%" stop-color="#2858cc"/><stop offset="50.5%" stop-color="#d26a31"/><stop offset="100%" stop-color="#d26a31"/></linearGradient></defs>
+    <rect x="${left}" y="${top}" width="${plotWidth}" height="${plotHeight / 2}" class="long-zone"/>
+    <rect x="${left}" y="${top + plotHeight / 2}" width="${plotWidth}" height="${plotHeight / 2}" class="short-zone"/>
+    <line x1="${left}" y1="${y(1)}" x2="${width - right}" y2="${y(1)}" class="tape-grid"/>
+    <line x1="${left}" y1="${y(0)}" x2="${width - right}" y2="${y(0)}" class="zero-line"/>
+    <line x1="${left}" y1="${y(-1)}" x2="${width - right}" y2="${y(-1)}" class="tape-grid"/>
+    <text x="8" y="${y(1) + 4}" class="axis-label">+100%</text><text x="21" y="${y(0) + 4}" class="axis-label">0%</text><text x="8" y="${y(-1) + 4}" class="axis-label">−100%</text>
+    <path d="${path}" class="position-line"/>
+    <circle cx="${x(rows.length - 1)}" cy="${y(last.position)}" r="3.5" class="position-end"/>
+    ${dateLabels(rows, width, left, right, height - 8)}
+  </svg>`;
+}
+
+function renderChangeChart(rows) {
+  if (!rows.length) return '<div class="chart-empty">当前区间没有调仓变化</div>';
+  const width = 760, height = 170, left = 48, right = 18, top = 15, bottom = 34;
+  const plotWidth = width - left - right, middle = top + (height - top - bottom) / 2;
+  const maxChange = Math.max(0.01, ...rows.map((row) => Math.abs(Number(row.position_change))));
+  const scale = (height - top - bottom) / 2 / maxChange;
+  const x = (index) => left + index / Math.max(1, rows.length - 1) * plotWidth;
+  const positive = [], negative = [];
+  rows.forEach((row, index) => {
+    const target = middle - Number(row.position_change) * scale;
+    const command = `M${x(index).toFixed(2)},${middle.toFixed(2)}V${target.toFixed(2)}`;
+    (row.position_change >= 0 ? positive : negative).push(command);
+  });
+  return `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="每次目标仓位变化，向上表示仓位数值增加，向下表示仓位数值减少">
+    <line x1="${left}" y1="${top}" x2="${width - right}" y2="${top}" class="tape-grid"/>
+    <line x1="${left}" y1="${middle}" x2="${width - right}" y2="${middle}" class="zero-line"/>
+    <line x1="${left}" y1="${height - bottom}" x2="${width - right}" y2="${height - bottom}" class="tape-grid"/>
+    <text x="4" y="${top + 4}" class="axis-label">${signedPct(maxChange)}</text><text x="21" y="${middle + 4}" class="axis-label">0%</text><text x="4" y="${height - bottom + 4}" class="axis-label">${signedPct(-maxChange)}</text>
+    <path d="${positive.join(" ")}" class="change-positive"/><path d="${negative.join(" ")}" class="change-negative"/>
+    ${dateLabels(rows, width, left, right, height - 8)}
+  </svg>`;
+}
+
+function visibleTrades() {
+  let rows = state.result.trades.filter((row) => row.symbol === state.symbol && row.frequency === state.tradeFrequency);
+  if (state.segment !== "all") rows = rows.filter((row) => row.segment === state.segment);
+  return rows.slice().reverse();
+}
+
+function renderTradeTable() {
+  const rows = visibleTrades();
+  const pages = Math.max(1, Math.ceil(rows.length / state.tradePageSize));
+  state.tradePage = Math.max(0, Math.min(state.tradePage, pages - 1));
+  const start = state.tradePage * state.tradePageSize;
+  const pageRows = rows.slice(start, start + state.tradePageSize);
+  $("#trade-count").textContent = `${rows.length.toLocaleString("zh-CN")} 笔`;
+  $("#trade-page").textContent = rows.length ? `第 ${state.tradePage + 1} / ${pages} 页` : "无调仓记录";
+  $("#trade-prev").disabled = state.tradePage === 0;
+  $("#trade-next").disabled = state.tradePage >= pages - 1;
+  $("#trade-table-body").innerHTML = pageRows.length ? pageRows.map((row) => {
+    const directionClass = row.position_change > 0 ? "increase" : "decrease";
+    return `<tr><td>${escapeHtml(row.signal_date)}</td><td><span class="action-tag ${directionClass}">${escapeHtml(tradeActionName(row.action))}</span></td>
+      <td>${pct(row.previous_position)}</td><td>${pct(row.target_position)}</td><td class="${directionClass}">${signedPct(row.position_change)}</td>
+      <td>${pct(row.cost_rate)}</td><td>${escapeHtml(row.return_date)}</td><td class="${row.net_return >= 0 ? "increase" : "decrease"}">${signedPct(row.net_return)}</td></tr>`;
+  }).join("") : '<tr><td colspan="8" class="table-empty">当前区间没有非零仓位变化</td></tr>';
+}
+
+function renderPositionWorkbench() {
+  if (!state.result) return;
+  const rows = visiblePeriods();
+  const trades = visibleTrades();
+  $("#position-chart").innerHTML = renderPositionChart(rows);
+  $("#change-chart").innerHTML = renderChangeChart(rows);
+  const latest = rows[rows.length - 1];
+  $("#position-caption").textContent = latest ? `最新 ${pct(latest.position)} · ${latest.signal_date}` : "无记录";
+  const maxChange = rows.length ? Math.max(...rows.map((row) => Math.abs(row.position_change))) : 0;
+  $("#change-caption").textContent = `${trades.length.toLocaleString("zh-CN")} 笔 · 最大变动 ${pct(maxChange)}`;
+  renderTradeTable();
 }
 
 function chartCard(frequency) {
@@ -217,3 +345,4 @@ function downloadCsv(rows, filename) {
 }
 $("#download-summary").addEventListener("click", () => downloadCsv(state.result.summaries, "kelly_summary.csv"));
 $("#download-periods").addEventListener("click", () => downloadCsv(state.result.periods, "kelly_periods.csv"));
+$("#download-trades").addEventListener("click", () => downloadCsv(state.result.trades, "kelly_trades.csv"));

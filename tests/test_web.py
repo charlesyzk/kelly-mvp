@@ -14,6 +14,9 @@ class WebTests(unittest.TestCase):
         self.assertIn("计算逻辑", html)
         self.assertIn("策略计算留在本机", html)
         self.assertIn("EODHD 取数", html)
+        self.assertIn("仓位与调仓轨迹", html)
+        self.assertIn("模拟逐笔调仓", html)
+        self.assertIn("下载调仓流水 CSV", html)
 
     @patch("kelly_mvp.web.fetch_daily_prices")
     def test_eodhd_payload_becomes_strategy_csv(self, fetch):
@@ -40,6 +43,7 @@ class WebTests(unittest.TestCase):
         frequencies = {row["frequency"] for row in result["summaries"]}
         self.assertEqual(frequencies, {"daily", "weekly", "monthly"})
         self.assertTrue(result["periods"])
+        self.assertTrue(result["trades"])
 
 
 if __name__ == "__main__":

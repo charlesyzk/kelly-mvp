@@ -2,9 +2,27 @@ import unittest
 from datetime import date, timedelta
 
 from kelly_mvp import PriceRow, StrategyConfig, run_backtest
+from kelly_mvp.backtest import classify_trade
 
 
 class BacktestTests(unittest.TestCase):
+    def test_trade_actions_cover_open_adjust_reverse_and_close(self):
+        cases = {
+            (0.0, 0.4): "open_long",
+            (0.0, -0.4): "open_short",
+            (0.4, 0.6): "add_long",
+            (0.6, 0.2): "reduce_long",
+            (-0.4, -0.6): "add_short",
+            (-0.6, -0.2): "cover_short",
+            (0.4, -0.2): "reverse_to_short",
+            (-0.4, 0.2): "reverse_to_long",
+            (0.4, 0.0): "close_long",
+            (-0.4, 0.0): "close_short",
+        }
+        for positions, expected in cases.items():
+            self.assertEqual(classify_trade(*positions), expected)
+        self.assertIsNone(classify_trade(0.2, 0.2))
+
     def test_signal_uses_prior_window_and_next_return(self):
         start = date(2020, 1, 1)
         rows = []
@@ -23,7 +41,12 @@ class BacktestTests(unittest.TestCase):
         self.assertEqual(first.return_date, rows[61].date)
         self.assertEqual(first.window_end_date, first.signal_date)
         self.assertGreater(first.position, 0)
+        self.assertEqual(first.previous_position, 0)
+        self.assertAlmostEqual(first.position_change, first.position)
         self.assertTrue(first.direction_correct)
+        first_trade = next(row for row in result.trades if row.frequency == "daily")
+        self.assertEqual(first_trade.action, "open_long")
+        self.assertAlmostEqual(first_trade.target_position, first.position)
 
     def test_zero_realized_return_is_not_forced_into_accuracy_denominator(self):
         start = date(2020, 1, 1)
