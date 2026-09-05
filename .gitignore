@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+.DS_Store
+outputs/
+examples/*.csv
+test/*.csv
+test/*.metadata.json
+/tools/audit_reference_support.py
+.venv/
+dist/
+*.egg-info/

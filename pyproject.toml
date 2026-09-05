@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kelly-mvp"
+version = "0.1.0"
+description = "Minimal rolling-60 fourth-moment Kelly research framework"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+kelly-mvp = "kelly_mvp.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+kelly_mvp = ["web_static/*"]

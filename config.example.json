@@ -1,0 +1,12 @@
+{
+  "windows": {
+    "daily": 60,
+    "weekly": 60,
+    "monthly": 60
+  },
+  "kelly_fraction": 0.5,
+  "lower_bound": -1.0,
+  "upper_bound": 1.0,
+  "transaction_cost_bps": 0.0,
+  "development_fraction": 0.7
+}

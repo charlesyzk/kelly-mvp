@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>K/60 · 滚动 Kelly 研究台</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="masthead">
+    <a class="brand" href="#top" aria-label="返回顶部"><span>K</span><i>/</i><strong>60</strong></a>
+    <div class="mast-copy">
+      <p class="eyebrow">滚动四阶矩 · 本地研究工具</p>
+      <h1>让一次仓位判断，<br>有来路，也有结果。</h1>
+    </div>
+    <div class="privacy"><span></span>数据只在本机计算</div>
+  </header>
+
+  <main id="top" class="workspace">
+    <aside class="control-panel" aria-labelledby="control-title">
+      <div class="panel-heading">
+        <p>运行设置</p>
+        <span>3个频率 · 各60期</span>
+      </div>
+      <h2 id="control-title">放入日线价格</h2>
+      <label class="drop-zone" id="drop-zone" for="file-input">
+        <input id="file-input" type="file" accept=".csv,text/csv">
+        <span class="drop-mark">CSV</span>
+        <strong id="file-label">选择或拖入文件</strong>
+        <small>date, symbol, adjusted_close</small>
+      </label>
+      <button class="text-button" id="demo-button" type="button">没有数据？载入合成演示</button>
+
+      <div class="field-grid">
+        <label>
+          <span>Kelly 比例</span>
+          <input id="fraction" type="number" min="0.05" max="1" step="0.05" value="0.5">
+          <small>0.5 即 Half Kelly</small>
+        </label>
+        <label>
+          <span>单边成本（bps）</span>
+          <input id="cost" type="number" min="0" max="1000" step="1" value="10">
+          <small>10 bps = 0.10%</small>
+        </label>
+      </div>
+
+      <div class="fixed-rule">
+        <span>固定边界</span><strong>−100% → +100%</strong>
+      </div>
+      <button class="run-button" id="run-button" type="button" disabled>
+        <span>开始计算</span><b>→</b>
+      </button>
+      <p class="status" id="status" role="status">先选择一份日频复权价格 CSV。</p>
+    </aside>
+
+    <section class="main-stage">
+      <section class="logic-strip" aria-labelledby="logic-title">
+        <div class="logic-heading">
+          <p>每一次判断</p>
+          <h2 id="logic-title">只看身后的 60 期，再走向下一期</h2>
+        </div>
+        <div class="frequency-lanes" aria-hidden="true">
+          <div class="lane daily"><b>日</b><div class="ticks"></div><span>f</span><i>次日</i></div>
+          <div class="lane weekly"><b>周</b><div class="ticks"></div><span>f</span><i>次周</i></div>
+          <div class="lane monthly"><b>月</b><div class="ticks"></div><span>f</span><i>次月</i></div>
+        </div>
+        <p class="logic-caption">60 个收益估计四个矩 → 求仓位 f → 用下一期真实收益验算</p>
+      </section>
+
+      <section id="empty-state" class="empty-state">
+        <div class="empty-orbit"><span>q₁</span><span>q₂</span><span>q₃</span><span>q₄</span><b>f</b></div>
+        <h2>结果会在这里展开</h2>
+        <p>先从左侧放入价格文件。程序会为每个标的分别计算日、周、月三套结果。</p>
+      </section>
+
+      <section id="results" class="results" hidden>
+        <div class="result-toolbar">
+          <label>查看标的 <select id="symbol-select"></select></label>
+          <div class="segment-tabs" role="tablist" aria-label="评价区间">
+            <button data-segment="development" type="button">开发段 70%</button>
+            <button data-segment="holdout" type="button">保留段 30%</button>
+            <button data-segment="all" class="active" type="button">全区间</button>
+          </div>
+        </div>
+        <div id="metric-cards" class="metric-cards"></div>
+        <div id="charts" class="charts"></div>
+        <div class="download-row">
+          <button id="download-summary" type="button">下载摘要 CSV</button>
+          <button id="download-periods" type="button">下载逐期明细 CSV</button>
+        </div>
+        <div id="warnings" class="warnings" hidden></div>
+      </section>
+
+      <details class="method-card">
+        <summary><span>计算逻辑</span><b>展开公式与口径</b></summary>
+        <div class="method-grid">
+          <article><em>1</em><h3>生成三种频率</h3><p>日线直接使用；周线和月线取每个完整周期最后一条复权价格。不能确认完整的最后一周或最后一月会被舍弃。</p></article>
+          <article><em>2</em><h3>计算收益</h3><code>Rₜ = Pₜ / Pₜ₋₁ − 1</code><p>日、周、月各自独立计算，不跨频率拼接。</p></article>
+          <article><em>3</em><h3>滚动四阶矩</h3><code>qₖ = (1/60) Σ Rᵢᵏ，k=1…4</code><p>假设下一期收益的前四阶矩与最近 60 期相同。这是估计假设，不是已知事实。</p></article>
+          <article><em>4</em><h3>求 Full Kelly</h3><code>G₄(f)=q₁f−q₂f²/2+q₃f³/3−q₄f⁴/4</code><p>求使 G₄ 最大的 f，并限制在 −1 到 +1。</p></article>
+          <article><em>5</em><h3>降低仓位</h3><code>实际仓位 = Kelly比例 × Full Kelly</code><p>默认比例 0.5。Full Kelly 和实际仓位都会保留在明细中。</p></article>
+          <article><em>6</em><h3>用下一期验算</h3><code>M=(1+fRₜ₊₁)(1−成本×换手)</code><p>方向准确率只统计仓位和真实收益均非零的时期；同时计算收益、买入持有、回撤和换手。</p></article>
+        </div>
+      </details>
+    </section>
+  </main>
+  <footer>研究结果不构成投资建议 · 未计入滑点、融资与融券限制</footer>
+  <script src="/app.js"></script>
+</body>
+</html>
