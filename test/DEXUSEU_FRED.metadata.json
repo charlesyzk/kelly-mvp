@@ -1,0 +1,16 @@
+{
+  "dataset": "U.S. Dollars to Euro Spot Exchange Rate",
+  "symbol_in_file": "EURUSD_FRED",
+  "source": "Federal Reserve Bank of St. Louis (FRED)",
+  "original_source": "Board of Governors of the Federal Reserve System (US)",
+  "source_series": "DEXUSEU",
+  "source_url": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DEXUSEU&cosd=2010-01-01&coed=2026-09-04",
+  "source_note": "U.S. dollars to one euro, daily noon buying rate; Public Domain: Citation Requested.",
+  "suggested_citation": "Board of Governors of the Federal Reserve System (US), U.S. Dollars to Euro Spot Exchange Rate [DEXUSEU], retrieved from FRED, Federal Reserve Bank of St. Louis.",
+  "retrieved_at_utc": "2026-09-05T11:17:06.081082+00:00",
+  "first_date": "2010-01-04",
+  "last_date": "2026-08-28",
+  "rows": 4167,
+  "source_sha256": "8fc44b658d801ebfbcae4f9c3512b82f3a31c234697e6af12dab60442120a8c3",
+  "converted_sha256": "82c67da8a9b9753f975566a2aa6db6247941cd1bd96766eec08d18f0832fccf1"
+}

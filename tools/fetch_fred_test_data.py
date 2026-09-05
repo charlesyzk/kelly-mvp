@@ -1,4 +1,4 @@
-"""Download and convert a fixed FRED S&P 500 snapshot for local testing."""
+"""Download a fixed public-domain FRED exchange-rate snapshot for testing."""
 
 from __future__ import annotations
 
@@ -17,9 +17,10 @@ from urllib.request import Request, urlopen
 
 SOURCE_URL = (
     "https://fred.stlouisfed.org/graph/fredgraph.csv"
-    "?id=SP500&cosd=2016-09-01&coed=2026-09-04"
+    "?id=DEXUSEU&cosd=2010-01-01&coed=2026-09-04"
 )
-OUTPUT_NAME = "SP500_FRED.csv"
+SERIES_ID = "DEXUSEU"
+OUTPUT_NAME = "DEXUSEU_FRED.csv"
 
 
 def download_source() -> bytes:
@@ -67,10 +68,10 @@ def main(source_file: str | None = None) -> None:
     converted: list[tuple[str, str, str]] = []
     for row in csv.DictReader(io.StringIO(source_text)):
         observed = (row.get("observation_date") or "").strip()
-        value = (row.get("SP500") or "").strip()
+        value = (row.get(SERIES_ID) or "").strip()
         if observed and value not in {"", "."}:
             float(value)
-            converted.append((observed, "SP500_FRED", value))
+            converted.append((observed, "EURUSD_FRED", value))
     if len(converted) < 1_500:
         raise RuntimeError(f"unexpectedly short FRED response: {len(converted)} rows")
 
@@ -85,12 +86,18 @@ def main(source_file: str | None = None) -> None:
     data_path.write_bytes(output_bytes)
 
     metadata = {
-        "dataset": "S&P 500 daily close",
-        "symbol_in_file": "SP500_FRED",
+        "dataset": "U.S. Dollars to Euro Spot Exchange Rate",
+        "symbol_in_file": "EURUSD_FRED",
         "source": "Federal Reserve Bank of St. Louis (FRED)",
-        "source_series": "SP500",
+        "original_source": "Board of Governors of the Federal Reserve System (US)",
+        "source_series": SERIES_ID,
         "source_url": SOURCE_URL,
-        "source_note": "Price index, daily close, excludes dividends.",
+        "source_note": "U.S. dollars to one euro, daily noon buying rate; Public Domain: Citation Requested.",
+        "suggested_citation": (
+            "Board of Governors of the Federal Reserve System (US), "
+            "U.S. Dollars to Euro Spot Exchange Rate [DEXUSEU], "
+            "retrieved from FRED, Federal Reserve Bank of St. Louis."
+        ),
         "retrieved_at_utc": datetime.now(timezone.utc).isoformat(),
         "first_date": converted[0][0],
         "last_date": converted[-1][0],
@@ -98,7 +105,7 @@ def main(source_file: str | None = None) -> None:
         "source_sha256": hashlib.sha256(source_bytes).hexdigest(),
         "converted_sha256": hashlib.sha256(output_bytes).hexdigest(),
     }
-    metadata_path = target_dir / "SP500_FRED.metadata.json"
+    metadata_path = target_dir / "DEXUSEU_FRED.metadata.json"
     metadata_path.write_text(
         json.dumps(metadata, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",

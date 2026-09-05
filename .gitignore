@@ -3,8 +3,8 @@ __pycache__/
 .DS_Store
 outputs/
 examples/*.csv
-test/*.csv
-test/*.metadata.json
+test/SP500_FRED.csv
+test/SP500_FRED.metadata.json
 /tools/audit_reference_support.py
 .venv/
 dist/
