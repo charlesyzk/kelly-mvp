@@ -7,5 +7,7 @@ test/SP500_FRED.csv
 test/SP500_FRED.metadata.json
 /tools/audit_reference_support.py
 .venv/
+.env
+.env.*
 dist/
 *.egg-info/

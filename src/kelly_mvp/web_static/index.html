@@ -13,7 +13,7 @@
       <p class="eyebrow">滚动四阶矩 · 本地研究工具</p>
       <h1>让一次仓位判断，<br>有来路，也有结果。</h1>
     </div>
-    <div class="privacy"><span></span>数据只在本机计算</div>
+    <div class="privacy"><span></span>策略计算留在本机</div>
   </header>
 
   <main id="top" class="workspace">
@@ -22,14 +22,35 @@
         <p>运行设置</p>
         <span>3个频率 · 各60期</span>
       </div>
-      <h2 id="control-title">放入日线价格</h2>
-      <label class="drop-zone" id="drop-zone" for="file-input">
-        <input id="file-input" type="file" accept=".csv,text/csv">
-        <span class="drop-mark">CSV</span>
-        <strong id="file-label">选择或拖入文件</strong>
-        <small>date, symbol, adjusted_close</small>
-      </label>
-      <button class="text-button" id="demo-button" type="button">没有数据？载入合成演示</button>
+      <h2 id="control-title">取得日线价格</h2>
+      <div class="source-tabs" role="tablist" aria-label="行情来源">
+        <button id="csv-tab" class="active" data-source="csv" type="button">上传 CSV</button>
+        <button id="eodhd-tab" data-source="eodhd" type="button">EODHD 取数</button>
+      </div>
+
+      <section id="csv-source" class="source-panel">
+        <label class="drop-zone" id="drop-zone" for="file-input">
+          <input id="file-input" type="file" accept=".csv,text/csv">
+          <span class="drop-mark">CSV</span>
+          <strong id="file-label">选择或拖入文件</strong>
+          <small>date, symbol, adjusted_close</small>
+        </label>
+        <button class="text-button" id="demo-button" type="button">没有数据？载入合成演示</button>
+      </section>
+
+      <section id="eodhd-source" class="source-panel api-source" hidden>
+        <label>
+          <span>EODHD 代码</span>
+          <input id="eodhd-symbol" type="text" value="300308.SHE" maxlength="64" autocomplete="off">
+          <small>例如 300308.SHE、AAPL.US</small>
+        </label>
+        <div class="api-date-grid">
+          <label><span>开始日期</span><input id="eodhd-from" type="date" value="2012-01-01"></label>
+          <label><span>结束日期</span><input id="eodhd-to" type="date"><small>留空表示今天</small></label>
+        </div>
+        <button class="fetch-button" id="eodhd-fetch" type="button">拉取真实日线</button>
+        <p id="eodhd-config-status" class="api-note">正在检查服务端 Token…</p>
+      </section>
 
       <div class="field-grid">
         <label>
@@ -50,7 +71,7 @@
       <button class="run-button" id="run-button" type="button" disabled>
         <span>开始计算</span><b>→</b>
       </button>
-      <p class="status" id="status" role="status">先选择一份日频复权价格 CSV。</p>
+      <p class="status" id="status" role="status">先上传 CSV，或从 EODHD 拉取日频复权价格。</p>
     </aside>
 
     <section class="main-stage">

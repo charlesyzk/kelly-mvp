@@ -9,12 +9,17 @@ from pathlib import Path
 from .backtest import run_backtest
 from .config import StrategyConfig
 from .data import load_daily_prices
+from .eodhd import fetch_daily_prices
 from .report import write_outputs
 
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Rolling-60 M4 Kelly research backtest")
-    parser.add_argument("--input", required=True, help="CSV: date,symbol,adjusted_close")
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--input", help="CSV: date,symbol,adjusted_close")
+    source.add_argument("--eodhd-symbol", help="download daily prices, for example 300308.SHE")
+    parser.add_argument("--eodhd-from", help="EODHD start date: YYYY-MM-DD")
+    parser.add_argument("--eodhd-to", help="EODHD end date; defaults to today")
     parser.add_argument("--output", required=True, help="new output directory")
     parser.add_argument("--config", help="optional JSON configuration")
     parser.add_argument("--cost-bps", type=float, help="override one-way turnover cost in bps")
@@ -31,8 +36,20 @@ def _config(args: argparse.Namespace) -> StrategyConfig:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = _parser().parse_args(argv)
-    result = run_backtest(load_daily_prices(args.input), _config(args))
+    parser = _parser()
+    args = parser.parse_args(argv)
+    if args.eodhd_symbol and not args.eodhd_from:
+        parser.error("--eodhd-symbol requires --eodhd-from")
+    try:
+        rows = (
+            fetch_daily_prices(args.eodhd_symbol, args.eodhd_from, args.eodhd_to)
+            if args.eodhd_symbol
+            else load_daily_prices(args.input)
+        )
+    except (FileNotFoundError, RuntimeError, ValueError) as exc:
+        print(f"Data error: {exc}")
+        return 2
+    result = run_backtest(rows, _config(args))
     if not result.periods:
         print("No evaluable periods were produced.")
         for issue in result.issues:

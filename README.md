@@ -9,7 +9,7 @@
 
 ## 固定研究口径
 
-- 输入：一份日频复权收盘价 CSV，列为 `date,symbol,adjusted_close`。
+- 输入：日频复权收盘价；可上传 `date,symbol,adjusted_close` CSV，也可由服务端调用 EODHD 历史日线接口。
 - 频率：日、周、月；周线和月线由日线取每个完整周期的最后一个价格。
 - 窗口：60 日、60 周、60 月，均指 60 个该频率的有效收益。
 - 分布假设：下一期简单收益的前四阶原始矩，与最近 60 期经验矩相同。
@@ -34,6 +34,15 @@ python3 run_web.py
 
 浏览器打开 `http://127.0.0.1:8765`。选择 CSV 后点击“开始计算”，网页会直接显示日、周、月结果，也可以下载摘要与逐期明细。上传内容只在本机内存中计算，不会发送到互联网，也不会由网页服务自动保存。
 
+如果有 EODHD Token，可在启动前把它放入环境变量：
+
+```bash
+export EODHD_API_TOKEN="你的Token"
+python3 run_web.py
+```
+
+随后在网页选择“EODHD 取数”，填写例如 `300308.SHE` 和日期范围。浏览器不会接触 Token；本地服务仅把代码、日期和 Token 发给 EODHD 取得真实日线，返回行情仍在本机内存中运行同一套策略。Token 不会写入源码、日志、报告或下载文件。
+
 仓库已附公开领域的真实测试数据 `test/DEXUSEU_FRED.csv`。它是美元兑欧元日汇率，用于测试完整调用链；来源、引用方式和限制见 `test/README.md`。也可运行 `python3 tools/fetch_fred_test_data.py` 重建同一固定区间。
 
 ### 命令行方式
@@ -56,6 +65,22 @@ PYTHONPATH=src python3 -m kelly_mvp \
   --output outputs/real_run \
   --cost-bps 0
 ```
+
+直接调用 EODHD：
+
+```bash
+export EODHD_API_TOKEN="你的Token"
+PYTHONPATH=src python3 -m kelly_mvp \
+  --eodhd-symbol 300308.SHE \
+  --eodhd-from 2012-01-01 \
+  --eodhd-to 2026-08-31 \
+  --output outputs/300308 \
+  --cost-bps 10
+```
+
+`--eodhd-to` 可以省略，默认取到当天。EODHD 模式只下载日线复权价格，周线、月线仍由本项目按同一规则聚合，避免三个来源口径不一致。调用会消耗 EODHD 账户额度，具体历史范围和市场权限取决于订阅。
+
+接口参数和代码格式请参考 [EODHD 官方历史行情文档](https://eodhd.com/financial-apis/api-for-historical-data-and-volumes)。
 
 输出包括：
 

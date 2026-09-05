@@ -5,6 +5,7 @@ const fileInput = $("#file-input");
 const dropZone = $("#drop-zone");
 const runButton = $("#run-button");
 const status = $("#status");
+const eodhdFetchButton = $("#eodhd-fetch");
 
 document.querySelectorAll(".ticks").forEach((el) => {
   el.title = "60 个同频率收益观测";
@@ -19,6 +20,31 @@ function setFile(text, name) {
   const lines = Math.max(0, text.trim().split(/\r?\n/).length - 1);
   status.textContent = `已读取 ${lines.toLocaleString("zh-CN")} 行，尚未计算。`;
 }
+
+document.querySelectorAll(".source-tabs button").forEach((button) => button.addEventListener("click", () => {
+  document.querySelectorAll(".source-tabs button").forEach((item) => item.classList.toggle("active", item === button));
+  $("#csv-source").hidden = button.dataset.source !== "csv";
+  $("#eodhd-source").hidden = button.dataset.source !== "eodhd";
+}));
+
+async function checkEodhdStatus() {
+  const note = $("#eodhd-config-status");
+  try {
+    const response = await fetch("/api/eodhd/status");
+    const data = await response.json();
+    note.className = data.configured ? "api-note ready" : "api-note error";
+    note.textContent = data.configured
+      ? "服务端 Token 已配置；密钥不会发送到浏览器。"
+      : "服务端未配置 EODHD_API_TOKEN。";
+    eodhdFetchButton.disabled = !data.configured;
+  } catch (_error) {
+    note.className = "api-note error";
+    note.textContent = "无法检查 EODHD 配置状态。";
+    eodhdFetchButton.disabled = true;
+  }
+}
+
+checkEodhdStatus();
 
 async function readFile(file) {
   if (!file) return;
@@ -49,6 +75,35 @@ $("#demo-button").addEventListener("click", async () => {
   } catch (error) {
     status.className = "status error";
     status.textContent = error.message;
+  }
+});
+
+eodhdFetchButton.addEventListener("click", async () => {
+  eodhdFetchButton.disabled = true;
+  const originalText = eodhdFetchButton.textContent;
+  eodhdFetchButton.textContent = "正在连接 EODHD…";
+  status.className = "status";
+  status.textContent = "正在从 EODHD 拉取真实日线；策略计算仍在本机完成。";
+  try {
+    const response = await fetch("/api/eodhd/prices", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        symbol: $("#eodhd-symbol").value,
+        start_date: $("#eodhd-from").value,
+        end_date: $("#eodhd-to").value,
+      }),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "EODHD取数失败");
+    setFile(data.csv_text, `${data.symbol}_${data.first_date}_${data.last_date}_EODHD.csv`);
+    status.textContent = `EODHD 已返回 ${data.rows.toLocaleString("zh-CN")} 条真实日线（${data.first_date} 至 ${data.last_date}），可以开始计算。`;
+  } catch (error) {
+    status.className = "status error";
+    status.textContent = error.message;
+  } finally {
+    eodhdFetchButton.disabled = false;
+    eodhdFetchButton.textContent = originalText;
   }
 });
 

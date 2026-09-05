@@ -55,6 +55,10 @@ button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-v
 .panel-heading p { color: #8eb1ff; margin: 0; }
 .panel-heading span { color: #9dabba; font-size: 11px; }
 .control-panel h2 { margin: 24px 0 15px; font-family: "Arial Narrow", "Avenir Next Condensed", sans-serif; font-size: 28px; letter-spacing: -.02em; }
+.source-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 3px; margin-bottom: 12px; background: #122031; padding: 3px; }
+.source-tabs button { min-height: 36px; border: 0; background: transparent; color: #94a3b1; cursor: pointer; font-size: 11px; }
+.source-tabs button.active { background: #31465c; color: white; }
+.source-panel[hidden] { display: none; }
 .drop-zone { min-height: 154px; border: 1px dashed #71849a; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 7px; cursor: pointer; background: rgba(255,255,255,.035); transition: border-color .2s, background .2s; }
 .drop-zone:hover, .drop-zone.dragging { border-color: #8eb1ff; background: rgba(142,177,255,.08); }
 .drop-zone input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
@@ -62,6 +66,17 @@ button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-v
 .drop-zone strong { font-size: 14px; }
 .drop-zone small, .field-grid small { color: #94a3b1; font-size: 10px; }
 .text-button { width: 100%; border: 0; background: transparent; color: #a9c1ff; text-decoration: underline; cursor: pointer; font-size: 12px; }
+.api-source { min-height: 198px; border: 1px solid #506275; padding: 14px; background: rgba(255,255,255,.035); }
+.api-source label { display: flex; flex-direction: column; gap: 5px; color: #bcc7d1; font-size: 11px; }
+.api-source input { width: 100%; min-width: 0; border: 1px solid #506275; color: white; background: #213347; padding: 0 9px; border-radius: 0; color-scheme: dark; }
+.api-source small, .api-note { color: #94a3b1; font-size: 9px; }
+.api-date-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 11px; }
+.fetch-button { width: 100%; margin-top: 12px; border: 1px solid #8eb1ff; background: transparent; color: #c8d7ff; cursor: pointer; }
+.fetch-button:hover:not(:disabled) { background: rgba(142,177,255,.12); }
+.fetch-button:disabled { opacity: .45; cursor: not-allowed; }
+.api-note { margin: 9px 0 0; line-height: 1.45; }
+.api-note.ready { color: #78d7c9; }
+.api-note.error { color: #ffaaa0; }
 .field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 18px; }
 .field-grid label { display: flex; flex-direction: column; gap: 5px; font-size: 11px; color: #bcc7d1; }
 .field-grid input { width: 100%; border: 1px solid #506275; color: white; background: #213347; padding: 0 10px; border-radius: 0; }
@@ -76,6 +91,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-v
 .status.error { color: #ffaaa0; }
 
 .main-stage { min-width: 0; }
+.empty-state[hidden], .results[hidden] { display: none; }
 .logic-strip, .empty-state, .results, .method-card { background: rgba(248,250,251,.94); border: 1px solid rgba(94,116,132,.24); box-shadow: 0 8px 30px rgba(34,57,76,.06); }
 .logic-strip { padding: 28px 30px 22px; }
 .logic-heading { display: flex; justify-content: space-between; gap: 20px; align-items: baseline; }

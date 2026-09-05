@@ -61,6 +61,21 @@ def load_daily_prices(path: str | Path) -> list[PriceRow]:
     return parse_daily_prices(source.read_text(encoding="utf-8-sig"))
 
 
+def daily_prices_to_csv(rows: Iterable[PriceRow]) -> str:
+    """Serialize normalized prices using the project's public CSV contract."""
+
+    output = io.StringIO(newline="")
+    writer = csv.writer(output, lineterminator="\n")
+    writer.writerow(("date", "symbol", "adjusted_close"))
+    count = 0
+    for row in rows:
+        writer.writerow((row.date.isoformat(), row.symbol, format(row.adjusted_close, ".15g")))
+        count += 1
+    if count == 0:
+        raise ValueError("cannot serialize an empty price series")
+    return output.getvalue()
+
+
 def _period_key(observed: date, frequency: str) -> tuple[int, int]:
     if frequency == "weekly":
         iso = observed.isocalendar()

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from dataclasses import asdict
 from datetime import date
 from http import HTTPStatus
@@ -13,8 +14,9 @@ from typing import Any
 
 from .backtest import run_backtest
 from .config import StrategyConfig
-from .data import parse_daily_prices
+from .data import daily_prices_to_csv, parse_daily_prices
 from .demo import generate_demo_csv
+from .eodhd import fetch_daily_prices
 
 
 STATIC_DIR = Path(__file__).with_name("web_static")
@@ -49,8 +51,27 @@ def calculate_payload(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def fetch_eodhd_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    symbol = payload.get("symbol")
+    start_date = payload.get("start_date")
+    end_date = payload.get("end_date")
+    if not isinstance(symbol, str) or not symbol.strip():
+        raise ValueError("请输入EODHD代码")
+    if not isinstance(start_date, str) or not start_date.strip():
+        raise ValueError("请选择开始日期")
+    rows = fetch_daily_prices(symbol, start_date, end_date)
+    return {
+        "csv_text": daily_prices_to_csv(rows),
+        "symbol": rows[0].symbol,
+        "rows": len(rows),
+        "first_date": rows[0].date,
+        "last_date": rows[-1].date,
+        "source": "EODHD",
+    }
+
+
 class KellyRequestHandler(BaseHTTPRequestHandler):
-    server_version = "KellyMVP/0.1"
+    server_version = "KellyMVP/0.2"
 
     def _send_bytes(self, status: int, content_type: str, body: bytes) -> None:
         self.send_response(status)
@@ -76,6 +97,12 @@ class KellyRequestHandler(BaseHTTPRequestHandler):
             "/styles.css": ("styles.css", "text/css; charset=utf-8"),
             "/app.js": ("app.js", "text/javascript; charset=utf-8"),
         }
+        if self.path == "/api/eodhd/status":
+            self._send_json(
+                HTTPStatus.OK,
+                {"configured": bool(os.getenv("EODHD_API_TOKEN", "").strip())},
+            )
+            return
         if self.path == "/demo.csv":
             self._send_bytes(
                 HTTPStatus.OK,
@@ -91,7 +118,12 @@ class KellyRequestHandler(BaseHTTPRequestHandler):
         self._send_bytes(HTTPStatus.OK, content_type, (STATIC_DIR / filename).read_bytes())
 
     def do_POST(self) -> None:  # noqa: N802
-        if self.path != "/api/backtest":
+        handlers = {
+            "/api/backtest": calculate_payload,
+            "/api/eodhd/prices": fetch_eodhd_payload,
+        }
+        handler = handlers.get(self.path)
+        if handler is None:
             self._send_json(HTTPStatus.NOT_FOUND, {"error": "接口不存在"})
             return
         try:
@@ -104,9 +136,11 @@ class KellyRequestHandler(BaseHTTPRequestHandler):
             payload = json.loads(raw.decode("utf-8"))
             if not isinstance(payload, dict):
                 raise ValueError("请求格式不正确")
-            self._send_json(HTTPStatus.OK, calculate_payload(payload))
+            self._send_json(HTTPStatus.OK, handler(payload))
         except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
             self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+        except RuntimeError as exc:
+            self._send_json(HTTPStatus.BAD_GATEWAY, {"error": str(exc)})
         except (ArithmeticError, OverflowError):
             self._send_json(
                 HTTPStatus.BAD_REQUEST,
