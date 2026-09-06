@@ -55,6 +55,15 @@ button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-v
 .panel-heading p { color: #8eb1ff; margin: 0; }
 .panel-heading span { color: #9dabba; font-size: 11px; }
 .control-panel h2 { margin: 24px 0 15px; font-family: "Arial Narrow", "Avenir Next Condensed", sans-serif; font-size: 28px; letter-spacing: -.02em; }
+.strategy-picker { display: flex; flex-direction: column; gap: 6px; color: #bcc7d1; font-size: 11px; }
+.strategy-picker select { width: 100%; color: white; background: #213347; border-color: #506275; }
+.strategy-description { min-height: 32px; margin: 9px 0 0; color: #94a3b1; font-size: 10px; line-height: 1.55; }
+.strategy-upload { margin-top: 11px; padding: 11px; border: 1px solid #506275; background: rgba(255,255,255,.035); }
+.strategy-upload[hidden] { display: none; }
+.strategy-upload label { display: block; padding: 10px; border: 1px dashed #71849a; color: #c8d7ff; text-align: center; cursor: pointer; font-size: 11px; }
+.strategy-upload input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.strategy-upload a { display: inline-block; margin-top: 9px; color: #a9c1ff; font-size: 10px; }
+.strategy-upload small { display: block; margin-top: 6px; color: #94a3b1; font-size: 9px; line-height: 1.5; }
 .source-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 3px; margin-bottom: 12px; background: #122031; padding: 3px; }
 .source-tabs button { min-height: 36px; border: 0; background: transparent; color: #94a3b1; cursor: pointer; font-size: 11px; }
 .source-tabs button.active { background: #31465c; color: white; }
@@ -78,6 +87,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-v
 .api-note.ready { color: #78d7c9; }
 .api-note.error { color: #ffaaa0; }
 .field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 18px; }
+.field-grid label[hidden] { display: none; }
 .field-grid label { display: flex; flex-direction: column; gap: 5px; font-size: 11px; color: #bcc7d1; }
 .field-grid input { width: 100%; border: 1px solid #506275; color: white; background: #213347; padding: 0 10px; border-radius: 0; }
 .fixed-rule { margin: 18px 0; display: flex; justify-content: space-between; color: #9facb9; font-size: 11px; }
@@ -118,6 +128,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-v
 .results { margin-top: 24px; padding: 28px; }
 .result-toolbar { display: flex; justify-content: space-between; gap: 16px; align-items: center; border-bottom: 1px solid var(--grid); padding-bottom: 20px; }
 .result-toolbar label { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 10px; }
+.active-strategy { margin-right: auto; color: var(--blue); font: 700 10px Menlo, monospace; }
 select { border: 1px solid var(--grid); background: white; padding: 0 34px 0 12px; color: var(--ink); }
 .segment-tabs { display: flex; gap: 3px; background: #e2e8ec; padding: 3px; }
 .segment-tabs button { border: 0; padding: 0 13px; min-height: 36px; background: transparent; color: var(--muted); cursor: pointer; font-size: 11px; }

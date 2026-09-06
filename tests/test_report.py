@@ -25,10 +25,11 @@ class ReportTests(unittest.TestCase):
             self.assertTrue(periods.is_file())
             self.assertTrue(trades.is_file())
             self.assertTrue(signals.is_file())
-            self.assertIn("Rolling-60 M4 Kelly", report.read_text(encoding="utf-8"))
+            self.assertIn("M4_SIMPLE · 策略验证报告", report.read_text(encoding="utf-8"))
             self.assertIn("direction_accuracy", summary.read_text(encoding="utf-8-sig"))
             self.assertIn("position_change", trades.read_text(encoding="utf-8-sig"))
             self.assertIn("pending", signals.read_text(encoding="utf-8-sig"))
+            self.assertIn("strategy_id", periods.read_text(encoding="utf-8-sig"))
 
 
 if __name__ == "__main__":

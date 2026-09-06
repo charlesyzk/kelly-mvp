@@ -6,11 +6,11 @@ from dataclasses import asdict, dataclass
 from datetime import date
 from math import expm1, isfinite, log
 from statistics import fmean, pstdev
-from typing import Iterable
+from typing import Iterable, Mapping
 
 from .config import FREQUENCIES, StrategyConfig
 from .data import PriceRow, aggregate_prices, split_by_symbol
-from .model import choose_position
+from .module_strategy import StrategyContext, StrategyDefinition, get_builtin_strategy
 
 
 PERIODS_PER_YEAR = {"daily": 252, "weekly": 52, "monthly": 12}
@@ -20,23 +20,28 @@ PERIODS_PER_YEAR = {"daily": 252, "weekly": 52, "monthly": 12}
 class PeriodResult:
     symbol: str
     frequency: str
+    strategy_id: str
+    strategy_name: str
     signal_date: date
     return_date: date
     window_start_date: date
     window_end_date: date
-    raw_kelly: float
-    full_kelly: float
-    exact_full_kelly: float
-    exact_kelly_gap: float
+    raw_position: float | None
+    bounded_position: float
+    raw_kelly: float | None
+    full_kelly: float | None
+    exact_full_kelly: float | None
+    exact_kelly_gap: float | None
     exact_objective_loss: float | None
     optimizer_location: str
     position: float
     previous_position: float
     position_change: float
-    q1: float
-    q2: float
-    q3: float
-    q4: float
+    q1: float | None
+    q2: float | None
+    q3: float | None
+    q4: float | None
+    diagnostics: Mapping[str, str | int | float | bool | None]
     next_return: float
     direction_correct: bool | None
     turnover: float
@@ -54,19 +59,24 @@ class PeriodResult:
 class SignalResult:
     symbol: str
     frequency: str
+    strategy_id: str
+    strategy_name: str
     signal_date: date
     window_start_date: date
     window_end_date: date
-    raw_kelly: float
-    full_kelly: float
-    exact_full_kelly: float
-    exact_kelly_gap: float
+    raw_position: float | None
+    bounded_position: float
+    raw_kelly: float | None
+    full_kelly: float | None
+    exact_full_kelly: float | None
+    exact_kelly_gap: float | None
     exact_objective_loss: float | None
     optimizer_location: str
     position: float
     previous_position: float
     position_change: float
     turnover: float
+    diagnostics: Mapping[str, str | int | float | bool | None]
     evaluation_status: str
     segment: str
 
@@ -75,6 +85,8 @@ class SignalResult:
 class TradeResult:
     symbol: str
     frequency: str
+    strategy_id: str
+    strategy_name: str
     signal_date: date
     return_date: date | None
     action: str
@@ -94,6 +106,8 @@ class TradeResult:
 class SummaryResult:
     symbol: str
     frequency: str
+    strategy_id: str
+    strategy_name: str
     segment: str
     window: int
     observations: int
@@ -112,7 +126,7 @@ class SummaryResult:
     sharpe_zero_rf: float | None
     average_abs_position: float
     average_turnover: float
-    mean_abs_exact_kelly_gap: float
+    mean_abs_exact_kelly_gap: float | None
     exact_direction_agreement: float | None
     boundary_rate: float
     bankruptcies: int
@@ -206,13 +220,19 @@ def _summary(rows: list[PeriodResult], segment: str, window: int, cost_bps: floa
         annualized_log_growth = None
     volatility = pstdev(net) * annualizer**0.5 if n > 1 else 0.0
     mean = fmean(net) * annualizer if n else 0.0
+    exact_rows = [row for row in chosen if row.exact_kelly_gap is not None]
     diagnostic = [
-        row for row in chosen
-        if abs(row.full_kelly) > 1e-12 and abs(row.exact_full_kelly) > 1e-12
+        row for row in exact_rows
+        if row.full_kelly is not None
+        and row.exact_full_kelly is not None
+        and abs(row.full_kelly) > 1e-12
+        and abs(row.exact_full_kelly) > 1e-12
     ]
     return SummaryResult(
         symbol=chosen[0].symbol,
         frequency=chosen[0].frequency,
+        strategy_id=chosen[0].strategy_id,
+        strategy_name=chosen[0].strategy_name,
         segment=segment,
         window=window,
         observations=n,
@@ -231,7 +251,10 @@ def _summary(rows: list[PeriodResult], segment: str, window: int, cost_bps: floa
         sharpe_zero_rf=mean / volatility if volatility > 0 else None,
         average_abs_position=fmean(abs(row.position) for row in chosen),
         average_turnover=fmean(row.turnover for row in chosen),
-        mean_abs_exact_kelly_gap=fmean(abs(row.exact_kelly_gap) for row in chosen),
+        mean_abs_exact_kelly_gap=(
+            fmean(abs(row.exact_kelly_gap) for row in exact_rows)
+            if exact_rows else None
+        ),
         exact_direction_agreement=(
             sum(row.full_kelly * row.exact_full_kelly > 0 for row in diagnostic) / len(diagnostic)
             if diagnostic else None
@@ -242,8 +265,13 @@ def _summary(rows: list[PeriodResult], segment: str, window: int, cost_bps: floa
     )
 
 
-def run_backtest(daily_prices: Iterable[PriceRow], config: StrategyConfig | None = None) -> BacktestResult:
+def run_backtest(
+    daily_prices: Iterable[PriceRow],
+    config: StrategyConfig | None = None,
+    strategy: StrategyDefinition | None = None,
+) -> BacktestResult:
     active = config or StrategyConfig()
+    selected_strategy = strategy or get_builtin_strategy("M4_SIMPLE")
     periods: list[PeriodResult] = []
     signals: list[SignalResult] = []
     issues: list[str] = []
@@ -263,12 +291,21 @@ def run_backtest(daily_prices: Iterable[PriceRow], config: StrategyConfig | None
             previous_position = 0.0
             for evaluation_index, signal_index in enumerate(range(window, len(returns) + 1)):
                 sample = returns[signal_index - window:signal_index]
-                decision = choose_position(
-                    sample,
-                    lower=active.lower_bound,
-                    upper=active.upper_bound,
-                    fraction=active.kelly_fraction,
+                context = StrategyContext(
+                    symbol=symbol,
+                    frequency=frequency,
+                    signal_date=prices[signal_index].date,
+                    window_start_date=prices[signal_index - window].date,
+                    window_end_date=prices[signal_index].date,
+                    prices=tuple(
+                        row.adjusted_close
+                        for row in prices[signal_index - window:signal_index + 1]
+                    ),
+                    returns=tuple(sample),
                 )
+                decision = selected_strategy.decide(context, active)
+                diagnostics = {**decision.moments, **decision.diagnostics}
+                is_kelly = selected_strategy.kind == "builtin_kelly"
                 turnover = abs(decision.position - previous_position)
                 position_change = decision.position - previous_position
                 evaluated = signal_index < len(returns)
@@ -280,19 +317,27 @@ def run_backtest(daily_prices: Iterable[PriceRow], config: StrategyConfig | None
                 signals.append(SignalResult(
                     symbol=symbol,
                     frequency=frequency,
+                    strategy_id=selected_strategy.id,
+                    strategy_name=selected_strategy.name,
                     signal_date=prices[signal_index].date,
                     window_start_date=prices[signal_index - window].date,
                     window_end_date=prices[signal_index].date,
-                    raw_kelly=decision.raw_kelly,
-                    full_kelly=decision.full_kelly,
+                    raw_position=decision.raw_position,
+                    bounded_position=decision.bounded_position,
+                    raw_kelly=decision.raw_position if is_kelly else None,
+                    full_kelly=decision.bounded_position if is_kelly else None,
                     exact_full_kelly=decision.exact_full_kelly,
-                    exact_kelly_gap=decision.full_kelly - decision.exact_full_kelly,
+                    exact_kelly_gap=(
+                        decision.bounded_position - decision.exact_full_kelly
+                        if decision.exact_full_kelly is not None else None
+                    ),
                     exact_objective_loss=decision.exact_objective_loss,
                     optimizer_location=decision.optimizer_location,
                     position=decision.position,
                     previous_position=previous_position,
                     position_change=position_change,
                     turnover=turnover,
+                    diagnostics=diagnostics,
                     evaluation_status="evaluated" if evaluated else "pending",
                     segment=segment,
                 ))
@@ -315,27 +360,34 @@ def run_backtest(daily_prices: Iterable[PriceRow], config: StrategyConfig | None
                     if abs(decision.position) <= 1e-12 or abs(next_return) <= 1e-15
                     else decision.position * next_return > 0
                 )
-                moments = decision.moments
                 periods.append(PeriodResult(
                     symbol=symbol,
                     frequency=frequency,
+                    strategy_id=selected_strategy.id,
+                    strategy_name=selected_strategy.name,
                     signal_date=prices[signal_index].date,
                     return_date=prices[signal_index + 1].date,
                     window_start_date=prices[signal_index - window].date,
                     window_end_date=prices[signal_index].date,
-                    raw_kelly=decision.raw_kelly,
-                    full_kelly=decision.full_kelly,
+                    raw_position=decision.raw_position,
+                    bounded_position=decision.bounded_position,
+                    raw_kelly=decision.raw_position if is_kelly else None,
+                    full_kelly=decision.bounded_position if is_kelly else None,
                     exact_full_kelly=decision.exact_full_kelly,
-                    exact_kelly_gap=decision.full_kelly - decision.exact_full_kelly,
+                    exact_kelly_gap=(
+                        decision.bounded_position - decision.exact_full_kelly
+                        if decision.exact_full_kelly is not None else None
+                    ),
                     exact_objective_loss=decision.exact_objective_loss,
                     optimizer_location=decision.optimizer_location,
                     position=decision.position,
                     previous_position=previous_position,
                     position_change=position_change,
-                    q1=moments.q1,
-                    q2=moments.q2,
-                    q3=moments.q3,
-                    q4=moments.q4,
+                    q1=decision.moments.get("q1"),
+                    q2=decision.moments.get("q2"),
+                    q3=decision.moments.get("q3"),
+                    q4=decision.moments.get("q4"),
+                    diagnostics=diagnostics,
                     next_return=next_return,
                     direction_correct=direction,
                     turnover=turnover,
@@ -357,6 +409,8 @@ def run_backtest(daily_prices: Iterable[PriceRow], config: StrategyConfig | None
         TradeResult(
             symbol=signal.symbol,
             frequency=signal.frequency,
+            strategy_id=signal.strategy_id,
+            strategy_name=signal.strategy_name,
             signal_date=signal.signal_date,
             return_date=period.return_date if period else None,
             action=action,

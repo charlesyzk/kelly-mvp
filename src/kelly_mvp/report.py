@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import csv
+import json
+from collections.abc import Mapping
 from dataclasses import fields
 from html import escape
 from pathlib import Path
@@ -16,7 +18,14 @@ def _write_dataclasses(path: Path, rows: tuple[object, ...], row_type: type) -> 
         writer = csv.DictWriter(handle, fieldnames=names)
         writer.writeheader()
         for row in rows:
-            values = {name: getattr(row, name) for name in names}
+            values = {
+                name: (
+                    json.dumps(getattr(row, name), ensure_ascii=False, sort_keys=True)
+                    if isinstance(getattr(row, name), Mapping)
+                    else getattr(row, name)
+                )
+                for name in names
+            }
             writer.writerow(values)
 
 
@@ -45,9 +54,10 @@ def _polyline(
 
 def _html(result: BacktestResult) -> str:
     all_rows = [row for row in result.summaries if row.segment == "all"]
+    strategy_name = all_rows[0].strategy_name if all_rows else "策略"
     body_rows = "".join(
         "<tr>"
-        f"<td>{escape(row.symbol)}</td><td>{row.frequency}</td><td>{row.observations}</td>"
+        f"<td>{escape(row.strategy_name)}</td><td>{escape(row.symbol)}</td><td>{row.frequency}</td><td>{row.observations}</td>"
         f"<td>{_percent(row.direction_accuracy)}</td><td>{_percent(row.total_return)}</td>"
         f"<td>{_percent(row.annualized_return)}</td><td>{_bps(row.average_log_growth)}</td>"
         f"<td>{_percent(row.mean_abs_exact_kelly_gap)}</td><td>{_percent(row.buy_hold_return)}</td>"
@@ -72,15 +82,15 @@ def _html(result: BacktestResult) -> str:
     issues = "".join(f"<li>{escape(issue)}</li>" for issue in result.issues) or "<li>无</li>"
     return f"""<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
-<title>Rolling-60 M4 Kelly 报告</title><style>
+<title>{escape(strategy_name)} · 策略验证报告</title><style>
 body{{font-family:ui-sans-serif,system-ui,-apple-system;max-width:1120px;margin:40px auto;padding:0 20px;color:#18221c;background:#f5f7f2}}
 h1{{font-size:30px}} .note{{padding:14px 18px;background:#fff4cf;border-left:4px solid #d19a00}}
 table{{border-collapse:collapse;width:100%;background:white}} th,td{{padding:10px;border-bottom:1px solid #dfe5dc;text-align:right}} th:first-child,td:first-child{{text-align:left}}
 .charts{{display:grid;grid-template-columns:repeat(auto-fit,minmax(430px,1fr));gap:16px}} section{{background:white;padding:16px;border-radius:10px}}
 svg{{width:100%;height:180px;background:#fafcf8}} polyline{{fill:none;stroke-width:2}} .strategy{{stroke:#176b47}} .benchmark{{stroke:#d28b28}} .s{{color:#176b47}} .b{{color:#b36a08}}
-</style></head><body><h1>Rolling-60 M4 Kelly</h1>
-<p class="note">研究结果，不构成投资建议。模型假设最近 60 期前四阶矩可代表下一期；默认成本为配置值，未建模滑点、融资和融券约束。</p>
-<h2>核心结果（全区间）</h2><table><thead><tr><th>标的</th><th>频率</th><th>样本</th><th>方向准确率</th><th>累计收益</th><th>年化收益</th><th>单期对数增长</th><th>精确Kelly平均差</th><th>买入持有</th><th>最大回撤</th><th>平均换手</th></tr></thead><tbody>{body_rows}</tbody></table>
+</style></head><body><h1>{escape(strategy_name)} · 策略验证报告</h1>
+<p class="note">研究结果，不构成投资建议。策略只使用信号日前最近 60 期数据；成本为配置值，未建模滑点、融资和融券约束。</p>
+<h2>核心结果（全区间）</h2><table><thead><tr><th>策略</th><th>标的</th><th>频率</th><th>样本</th><th>方向准确率</th><th>累计收益</th><th>年化收益</th><th>单期对数增长</th><th>精确Kelly平均差</th><th>买入持有</th><th>最大回撤</th><th>平均换手</th></tr></thead><tbody>{body_rows}</tbody></table>
 <h2>净值曲线</h2><div class="charts">{''.join(charts)}</div>
 <h2>数据问题</h2><ul>{issues}</ul>
 <p>开发段/保留段的完整指标见 summary.csv；全部仓位含待验证当前信号见 signals.csv；已评价复算数据见 periods.csv；模拟调仓记录见 trades.csv。</p></body></html>"""

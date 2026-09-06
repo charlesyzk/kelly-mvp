@@ -1,6 +1,7 @@
 const state = {
   csvText: "", filename: "", result: null, symbol: "", segment: "all",
   tradeFrequency: "daily", tradePage: 0, tradePageSize: 20,
+  strategySource: "", strategyFilename: "", strategyId: "M4_SIMPLE",
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -9,6 +10,22 @@ const dropZone = $("#drop-zone");
 const runButton = $("#run-button");
 const status = $("#status");
 const eodhdFetchButton = $("#eodhd-fetch");
+const strategySelect = $("#strategy-select");
+const strategyFile = $("#strategy-file");
+
+const strategyDescriptions = {
+  M2_LOG: "对数收益二阶 Taylor 基准；使用均值与二阶风险。",
+  M3_LOG: "在二阶基准上加入对数收益三阶矩。",
+  M4_LOG_ZERO: "围绕零点展开的四阶对数收益 Kelly。",
+  M4_SIMPLE: "简单收益四阶 Taylor Kelly；保持当前项目既有口径。",
+  M4_LOG_MEAN: "围绕样本均值展开的四阶对数收益 Kelly。",
+  EMPIRICAL_EXACT: "直接最大化窗口经验样本的平均精确对数增长。",
+  uploaded: "按模板上传本地 Python 策略；回测、成本和指标仍由框架统一计算。",
+};
+
+function updateRunAvailability() {
+  runButton.disabled = !state.csvText || (state.strategyId === "uploaded" && !state.strategySource);
+}
 
 document.querySelectorAll(".ticks").forEach((el) => {
   el.title = "60 个同频率收益观测";
@@ -18,11 +35,38 @@ function setFile(text, name) {
   state.csvText = text;
   state.filename = name;
   $("#file-label").textContent = name;
-  runButton.disabled = false;
+  updateRunAvailability();
   status.className = "status";
   const lines = Math.max(0, text.trim().split(/\r?\n/).length - 1);
   status.textContent = `已读取 ${lines.toLocaleString("zh-CN")} 行，尚未计算。`;
 }
+
+strategySelect.addEventListener("change", () => {
+  state.strategyId = strategySelect.value;
+  const uploaded = state.strategyId === "uploaded";
+  $("#strategy-upload").hidden = !uploaded;
+  $("#kelly-fraction-field").hidden = uploaded;
+  $("#strategy-description").textContent = strategyDescriptions[state.strategyId] || "";
+  updateRunAvailability();
+});
+
+strategyFile.addEventListener("change", async () => {
+  const file = strategyFile.files[0];
+  if (!file) return;
+  if (!file.name.toLowerCase().endsWith(".py")) {
+    state.strategySource = "";
+    status.className = "status error";
+    status.textContent = "请选择 .py 策略文件。";
+    updateRunAvailability();
+    return;
+  }
+  state.strategySource = await file.text();
+  state.strategyFilename = file.name;
+  $("#strategy-file-label").textContent = file.name;
+  status.className = "status";
+  status.textContent = `已加载策略 ${file.name}；选择或拉取行情后即可计算。`;
+  updateRunAvailability();
+});
 
 document.querySelectorAll(".source-tabs button").forEach((button) => button.addEventListener("click", () => {
   document.querySelectorAll(".source-tabs button").forEach((item) => item.classList.toggle("active", item === button));
@@ -122,6 +166,9 @@ runButton.addEventListener("click", async () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         csv_text: state.csvText,
+        strategy_id: state.strategyId,
+        strategy_source: state.strategyId === "uploaded" ? state.strategySource : undefined,
+        strategy_filename: state.strategyId === "uploaded" ? state.strategyFilename : undefined,
         kelly_fraction: Number($("#fraction").value),
         transaction_cost_bps: Number($("#cost").value),
       }),
@@ -136,8 +183,9 @@ runButton.addEventListener("click", async () => {
     $("#symbol-select").innerHTML = symbols.map((symbol) => `<option>${escapeHtml(symbol)}</option>`).join("");
     $("#empty-state").hidden = true;
     $("#results").hidden = false;
+    $("#active-strategy").textContent = `${data.strategy.name} · v${data.strategy.version}`;
     render();
-    status.textContent = `完成 ${data.periods.length.toLocaleString("zh-CN")} 次样本外评价。`;
+    status.textContent = `${data.strategy.name} 完成 ${data.periods.length.toLocaleString("zh-CN")} 次样本外评价。`;
     $("#results").scrollIntoView({ behavior: "smooth", block: "start" });
   } catch (error) {
     status.className = "status error";
@@ -195,7 +243,7 @@ function render() {
     const frequency = frequencies[index];
     if (!row) return `<article class="metric-card ${frequency}"><header><b>${frequencyName(frequency)}</b></header><p>数据不足</p></article>`;
     return `<article class="metric-card ${frequency}">
-      <header><b>${frequencyName(frequency)}</b><span>60 ${frequency === "daily" ? "days" : frequency === "weekly" ? "weeks" : "months"}</span></header>
+      <header><b>${frequencyName(frequency)}</b><span>${row.window} ${frequency === "daily" ? "days" : frequency === "weekly" ? "weeks" : "months"}</span></header>
       <div class="primary-metric"><strong>${pct(row.direction_accuracy)}</strong><small>方向准确率<br>${row.direction_observations} 次判断</small></div>
       <div class="metric-list">
         <div><span>策略累计收益</span><b>${pct(row.total_return)}</b></div>
@@ -306,10 +354,21 @@ function renderDiagnostics() {
   const items = summary ? [
     ["单期平均对数增长", bps(summary.average_log_growth)],
     ["对数增长年化", pct(summary.annualized_log_growth)],
-    ["M4 / 精确仓位平均差", pct(summary.mean_abs_exact_kelly_gap)],
-    ["两者方向一致率", pct(summary.exact_direction_agreement)],
-    ["M4 触及边界比例", pct(summary.boundary_rate)],
+    ["触及仓位边界比例", pct(summary.boundary_rate)],
   ] : [];
+  if (summary && summary.mean_abs_exact_kelly_gap != null) {
+    items.push(["与经验精确仓位平均差", pct(summary.mean_abs_exact_kelly_gap)]);
+    items.push(["与经验精确方向一致率", pct(summary.exact_direction_agreement)]);
+  } else if (summary) {
+    const latest = visiblePeriods().at(-1);
+    Object.entries(latest?.diagnostics || {}).slice(0, 2).forEach(([key, value]) => {
+      items.push([key, typeof value === "number" ? number(value, 4) : String(value)]);
+    });
+  }
+  $("#diagnostic-title").textContent = `${state.result.strategy.name} · 策略诊断`;
+  $("#diagnostic-note").textContent = state.result.strategy.kind === "uploaded"
+    ? "上传策略的自定义诊断与统一绩效"
+    : "经验精确解用于比较同一窗口的目标差异";
   $("#strategy-diagnostics").innerHTML = items.length
     ? items.map(([label, value]) => `<div><span>${label}</span><strong>${value}</strong></div>`).join("")
     : '<p class="diagnostic-empty">当前频率与区间没有可评价诊断数据。</p>';
@@ -363,7 +422,8 @@ function downloadCsv(rows, filename) {
   link.href = URL.createObjectURL(new Blob(["\ufeff", csv], { type: "text/csv;charset=utf-8" }));
   link.download = filename; link.click(); URL.revokeObjectURL(link.href);
 }
-$("#download-summary").addEventListener("click", () => downloadCsv(state.result.summaries, "kelly_summary.csv"));
-$("#download-signals").addEventListener("click", () => downloadCsv(state.result.signals, "kelly_signals.csv"));
-$("#download-periods").addEventListener("click", () => downloadCsv(state.result.periods, "kelly_periods.csv"));
-$("#download-trades").addEventListener("click", () => downloadCsv(state.result.trades, "kelly_trades.csv"));
+function outputName(suffix) { return `${state.result.strategy.id}_${suffix}.csv`; }
+$("#download-summary").addEventListener("click", () => downloadCsv(state.result.summaries, outputName("summary")));
+$("#download-signals").addEventListener("click", () => downloadCsv(state.result.signals, outputName("signals")));
+$("#download-periods").addEventListener("click", () => downloadCsv(state.result.periods, outputName("periods")));
+$("#download-trades").addEventListener("click", () => downloadCsv(state.result.trades, outputName("trades")));

@@ -17,9 +17,11 @@ from .config import StrategyConfig
 from .data import daily_prices_to_csv, parse_daily_prices
 from .demo import generate_demo_csv
 from .eodhd import fetch_daily_prices
+from .module_strategy import get_builtin_strategy, load_user_strategy, strategy_catalog
 
 
 STATIC_DIR = Path(__file__).with_name("web_static")
+STRATEGY_TEMPLATE = Path(__file__).with_name("module_strategy") / "user_strategy_template.py"
 MAX_REQUEST_BYTES = 25 * 1024 * 1024
 
 
@@ -33,11 +35,23 @@ def calculate_payload(payload: dict[str, Any]) -> dict[str, Any]:
     except (TypeError, ValueError) as exc:
         raise ValueError("Kelly比例和交易成本必须是数字") from exc
     config = StrategyConfig(kelly_fraction=fraction, transaction_cost_bps=cost_bps)
-    result = run_backtest(parse_daily_prices(csv_text), config)
+    strategy_id = payload.get("strategy_id", "M4_SIMPLE")
+    if strategy_id == "uploaded":
+        source = payload.get("strategy_source")
+        if not isinstance(source, str):
+            raise ValueError("请选择要上传的 Python 策略文件")
+        filename = payload.get("strategy_filename", "uploaded_strategy.py")
+        strategy = load_user_strategy(source, str(filename))
+    elif isinstance(strategy_id, str):
+        strategy = get_builtin_strategy(strategy_id)
+    else:
+        raise ValueError("策略编号格式不正确")
+    result = run_backtest(parse_daily_prices(csv_text), config, strategy)
     if not result.periods:
         detail = "；".join(result.issues) or "数据不足"
         raise ValueError(f"没有产生可评价结果：{detail}")
     return {
+        "strategy": strategy.public_dict(),
         "config": {
             "windows": config.windows,
             "kelly_fraction": config.kelly_fraction,
@@ -51,6 +65,10 @@ def calculate_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "trades": [asdict(row) for row in result.trades],
         "issues": list(result.issues),
     }
+
+
+def strategy_catalog_payload() -> dict[str, object]:
+    return {"strategies": strategy_catalog()}
 
 
 def fetch_eodhd_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -73,7 +91,7 @@ def fetch_eodhd_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 class KellyRequestHandler(BaseHTTPRequestHandler):
-    server_version = "KellyMVP/0.4"
+    server_version = "StrategyLab/0.5"
 
     def _send_bytes(self, status: int, content_type: str, body: bytes) -> None:
         self.send_response(status)
@@ -104,6 +122,16 @@ class KellyRequestHandler(BaseHTTPRequestHandler):
             self._send_json(
                 HTTPStatus.OK,
                 {"configured": bool(os.getenv("EODHD_API_TOKEN", "").strip())},
+            )
+            return
+        if self.path == "/api/strategies":
+            self._send_json(HTTPStatus.OK, strategy_catalog_payload())
+            return
+        if self.path == "/strategy-template.py":
+            self._send_bytes(
+                HTTPStatus.OK,
+                "text/x-python; charset=utf-8",
+                STRATEGY_TEMPLATE.read_bytes(),
             )
             return
         if self.path == "/demo.csv":
@@ -155,14 +183,14 @@ class KellyRequestHandler(BaseHTTPRequestHandler):
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Start the local Kelly MVP web interface")
+    parser = argparse.ArgumentParser(description="Start the local strategy research interface")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", default=8765, type=int)
     args = parser.parse_args(argv)
     if args.host not in {"127.0.0.1", "localhost"}:
         parser.error("For data privacy this MVP only binds to 127.0.0.1 or localhost")
     server = ThreadingHTTPServer((args.host, args.port), KellyRequestHandler)
-    print(f"Kelly MVP is running at http://{args.host}:{args.port}")
+    print(f"Strategy Lab is running at http://{args.host}:{args.port}")
     print("Press Ctrl+C to stop.")
     try:
         server.serve_forever()
