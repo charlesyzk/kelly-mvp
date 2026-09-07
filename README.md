@@ -1,169 +1,149 @@
-# S/60 可插拔策略验证台
+# 高阶矩动态 Kelly 验证框架
 
-第一次使用、准备把项目发给朋友，请先看：[朋友使用说明](README_给朋友.md)。
+这是一个可插拔、可审计的策略研究工具。顶层可以切换完整 Kelly 策略或上传可信 Python 策略；框架统一完成数据处理、无前视滚动、下一期验证、净值和调仓审计。它不下单，也不承诺盈利。第一次使用可先看 [给朋友的使用说明](README_给朋友.md)。
 
-这是一个内部使用、可审计的滚动策略验证框架。它统一回答两个核心问题：
+## 策略层级
 
-1. 用最近 60 个同频率收益得到的仓位，对下一期方向判断有多准？
-2. 在同一回测区间内，策略收益和买入持有相比怎样？
+- `KELLY_SIX_MODEL` 是一套顶层策略模块。它内部同时运行六个模型及三类仓位，页面结果区再切换查看；六个公式不是六个互相孤立的顶层策略。
+- “上传 Python 策略”是另一种顶层模式。下载 [`user_strategy_template.py`](src/kelly_mvp/module_strategy/user_strategy_template.py)，实现 `STRATEGY_META` 和 `decide(context)` 后即可在网页上传。
+- 上传策略只返回目标仓位，框架限制到 `[-1,1]` 并标为 `TARGET`。它与 Kelly 共用日/周/月窗口、pending、下一期收益、净值和调仓流水，但不参加 Kelly 专属的 M2、Bootstrap、FDR 比较。
+- 当前按内部可信代码使用，不提供 Python 沙箱；不要上传来源不明的代码。
 
-## 固定回测口径
+## 当前冻结口径
 
-- 输入：日频复权收盘价；可上传 `date,symbol,adjusted_close` CSV，也可由服务端调用 EODHD 历史日线接口。
-- 频率：日、周、月；周线和月线由日线取每个完整周期的最后一个价格。
-- 窗口：60 日、60 周、60 月，均指 60 个该频率的有效收益。
-- 策略：内置六种 Kelly 模型，也可上传符合模板的 Python 目标仓位策略。
-- 仓位：所有策略统一限制在 `[-1,1]`；内置 Kelly 默认再乘 `0.5`（Half Kelly）。
-- 时序：窗口截止于 `t`，仓位只评价 `t -> t+1` 的收益，不使用未来信息。
-- 准确率：仅在仓位非零且下一期收益非零时判断方向；零仓位/零收益不硬算成错误，分母单独输出。
-- 周/月最后一个聚合周期默认舍弃，因为仅凭文件截止日无法证明它已完整结束。
+- 模型：`M2_LOG`、`M3_LOG`、`M4_LOG_ZERO`、`M4_SIMPLE`、`M4_LOG_MEAN`、`EMPIRICAL_EXACT`。`M2_LOG` 是比较基准，另外五个是候选；经验精确模型也用于诊断 Taylor 截断。
+- 窗口：日 252、周 104、月 60 个同频率有效收益；最低正式匹配样本分别为 252、52、24。
+- 仓位：`RAW / BOUNDED / SAFE`，边界 `[-1,1]`。不再使用旧版 `FRACTIONAL / TRADE`、Half Kelly 或 70/30 切分。
+- 当前无风险对数收益率为 0，不启用交易成本。
+- 统计：循环移动区块 Bootstrap（日/周/月区块 20/8/6，2000 次，种子 `20260904`）；按“候选模型 × 仓位类型”在 18 个标的频率组内做 BH-FDR，正式阈值 5%，探索阈值 10%。
+- 主指标是带财富下限 `1e-12` 惩罚的平均对数增长；同时报告方向准确率、覆盖率、累计收益、买入持有、回撤、波动率、换手和破产。
 
-内置 Kelly 模型包括 `M2_LOG`、`M3_LOG`、`M4_LOG_ZERO`、`M4_SIMPLE`、`M4_LOG_MEAN` 和 `EMPIRICAL_EXACT`。六者使用相同的 60 期窗口、仓位边界、成本和下一期验证口径，默认模型仍为 `M4_SIMPLE`。
+候选只有同时满足“样本达标、相对同仓位类型 M2 的均值差为正且经 FDR、相对买入持有的差值置信区间下限不低于 0”才标为正式支持。方向准确率不能单独证明策略有效。
 
-对数收益模型当前明确采用“现金收益为零”的假设，没有静默引入无风险利率序列。`EMPIRICAL_EXACT` 现可作为正式可选模型，同时仍是其他 Kelly 模型的同窗口诊断基准。
+## 三类仓位与 κ
 
-## 运行
+- `RAW`：模型的有限原始候选；不存在时保持空值。
+- `BOUNDED`：直接在 `[-1,1]` 内最大化模型目标。
+- `SAFE`：在边界内进一步满足展开收敛安全域；`safe_domain_type` 标明 `LOG_TAYLOR / SIMPLE_TAYLOR / EXACT_DOMAIN`，`safe_domain_intervals` 保存可能不连通的完整区间。
 
-项目不依赖第三方 Python 包，Python 3.11 及以上即可。
+κ 是 SAFE 安全余量，必须满足 `0 < κ < 1`。网页提供 0.50、0.80、0.95 按钮和滑杆，修改后自动重算安全域及仓位；默认预注册值为 0.80。这里的“自动调整”不是遍历 κ 后挑历史收益最高的值。每次改变 κ 都是新研究设定，应使用新输出目录并披露参数。
 
-### 网页方式（推荐）
+## 安装与网页
+
+需要 Python 3.11 或更高版本。
 
 ```bash
+git clone https://github.com/charlesyzk/kelly-mvp.git
 cd kelly-mvp
+python3 -m pip install -e .
 python3 run_web.py
 ```
 
-浏览器打开 `http://127.0.0.1:8765`。选择内置模型或上传 Python 策略，再使用 CSV 或 EODHD 行情运行。网页会显示日、周、月结果，并可下载摘要、信号、逐期明细和调仓流水。上传内容只在本机内存中计算，不会发送到互联网，也不会由网页服务自动保存。
+Windows 将 `python3` 换成 `py`。打开 `http://127.0.0.1:8765`。页面先选择 Kelly 或上传策略，再载入明确标识的合成演示、日线 CSV、三工作表 Excel 或 EODHD。Kelly 模式显示 κ、模型和仓位筛选；上传模式显示策略文件及模板入口。所有指标均来自后端真实结果。
 
-### 上传自己的策略
-
-在页面点击“下载策略模板”，修改 `STRATEGY_META` 和 `decide(context)` 后上传 `.py` 文件。策略上下文只包含当前信号日及以前的数据：
-
-- `context.symbol`、`context.frequency`、`context.signal_date`；
-- `context.prices`：最近 61 个价格，最后一个是信号日价格；
-- `context.returns`：由上述价格形成的最近 60 个同频率简单收益；
-- `context.window_start_date`、`context.window_end_date`。
-
-`decide` 可以直接返回目标仓位数字，也可以返回：
-
-```python
-return {
-    "position": 0.5,
-    "diagnostics": {"score": 1.25},
-}
-```
-
-框架会把目标仓位限制到 `[-1,1]`，并统一计算下一期收益、交易成本和绩效。上传策略不会应用 Kelly 比例。该功能只适合当前约定的内部可信文件；Python 文件会在本机服务进程中直接执行。
-
-如果有 EODHD Token，可在启动前把它放入环境变量：
+EODHD Token 只从服务端环境变量读取，不进入浏览器、源码、报告或日志。历史参考代码中曾出现硬编码凭据，不能继续使用，建议账户持有人轮换。
 
 ```bash
+# macOS / Linux / WSL / Git Bash
 export EODHD_API_TOKEN="你的Token"
 python3 run_web.py
 ```
 
-随后在网页选择“EODHD 取数”，填写例如 `300308.SHE` 和日期范围。浏览器不会接触 Token；本地服务仅把代码、日期和 Token 发给 EODHD 取得真实日线，返回行情仍在本机内存中运行同一套策略。Token 不会写入源码、日志、报告或下载文件。
-
-仓库已附公开领域的真实测试数据 `test/DEXUSEU_FRED.csv`。它是美元兑欧元日汇率，用于测试完整调用链；来源、引用方式和限制见 `test/README.md`。也可运行 `python3 tools/fetch_fred_test_data.py` 重建同一固定区间。
-
-### 命令行方式
-
-先生成明确标注的合成演示数据并运行：
-
-```bash
-cd kelly-mvp
-python3 tools/make_demo_data.py
-PYTHONPATH=src python3 -m kelly_mvp \
-  --input examples/demo_prices.csv \
-  --strategy M4_SIMPLE \
-  --output outputs/demo
+```powershell
+# Windows PowerShell
+$env:EODHD_API_TOKEN="你的Token"
+py run_web.py
 ```
 
-使用真实数据：
-
-```bash
-PYTHONPATH=src python3 -m kelly_mvp \
-  --input /absolute/path/to/prices.csv \
-  --output outputs/real_run \
-  --cost-bps 0
+```bat
+rem Windows CMD / Anaconda Prompt
+set "EODHD_API_TOKEN=你的Token"
+py run_web.py
 ```
 
-直接调用 EODHD：
+## 数据输入
+
+### EODHD
+
+服务分别请求供应商日、周、月复权收盘价（`period=d/w/m`），三套序列独立进入对应窗口。调用会消耗账户额度，范围取决于订阅。
 
 ```bash
-export EODHD_API_TOKEN="你的Token"
 PYTHONPATH=src python3 -m kelly_mvp \
-  --eodhd-symbol 300308.SHE \
-  --eodhd-from 2012-01-01 \
-  --eodhd-to 2026-08-31 \
-  --output outputs/300308 \
-  --cost-bps 10
+  --eodhd-symbol 300308.SHE --eodhd-from 2010-01-01 --eodhd-to 2026-08-31 \
+  --kappa 0.8 --output outputs/300308_k080_20260907
 ```
 
-其他内置模型可通过 `--strategy M2_LOG` 等方式选择。运行自定义策略：
+### Excel（正式三频输入）
+
+工作簿使用名称固定为 `daily`、`weekly`、`monthly` 的三个工作表；每张表都有 `date | symbol | adjusted_close`。日期可为 Excel 日期或 `YYYY-MM-DD`，价格须有限且大于 0，同表同标的日期不得重复。网页和命令行均可直接读取；程序不会根据文件名猜频率，也不会用日线覆盖 Excel 周/月数据。
 
 ```bash
 PYTHONPATH=src python3 -m kelly_mvp \
-  --input /absolute/path/to/prices.csv \
+  --input /absolute/path/to/prices.xlsx --kappa 0.8 \
+  --output outputs/excel_k080_20260907
+```
+
+上传策略也可从命令行运行：
+
+```bash
+PYTHONPATH=src python3 -m kelly_mvp \
+  --input /absolute/path/to/prices.xlsx \
   --strategy-file /absolute/path/to/my_strategy.py \
-  --output outputs/custom
+  --output outputs/my_strategy_20260907
 ```
 
-`--eodhd-to` 可以省略，默认取到当天。EODHD 模式只下载日线复权价格，周线、月线仍由本项目按同一规则聚合，避免三个来源口径不一致。调用会消耗 EODHD 账户额度，具体历史范围和市场权限取决于订阅。
+### CSV（日线兼容输入）
 
-接口参数和代码格式请参考 [EODHD 官方历史行情文档](https://eodhd.com/financial-apis/api-for-historical-data-and-volumes)。
+CSV 列为 `date,symbol,adjusted_close`。只有日线时，程序会保守聚合完整周/月，用于兼容、演示和交叉核验；正式研究优先使用 EODHD 或 Excel 的直接三频数据，不能把聚合结果冒充供应商正式周/月序列。`test/DEXUSEU_FRED.csv` 是公开真实测试数据，来源与哈希见 `test/README.md`，只证明工程链路可运行。
 
-输出包括：
+## 输出与命名
 
-- `summary.csv`：准确率、累计/年化收益、买入持有、最大回撤、换手等摘要；
-- `signals.csv`：全部仓位信号，包含策略编号、原始/有界/最终仓位、诊断字段以及最后一个 `pending` 当前信号；
-- `periods.csv`：已经有下一期结果的信号、策略诊断、仓位、收益、成本、对数增长和净值，可逐行复算；
-- `trades.csv`：目标仓位发生变化的模拟调仓记录；最新待验证调仓的结果字段为空；
-- `report.html`：可直接打开的结果页面，含指标表和净值曲线。
+建议目录名：`{symbol_or_source}_k{κ×100三位整数}_{运行日期}`，例如 `300308_k080_20260907`。不要覆盖历史正式输出。
 
-网页结果区还提供目标仓位曲线、单次调仓变化图和可分页的模拟逐笔调仓表，可按标的、开发/保留区间及日/周/月频率切换。这里的“逐笔”是模型目标仓位变化，不是券商成交回报；项目没有虚构成交价、股数或成交状态。
+- `summary.csv`：六模型 × 三仓位摘要；
+- `periods.csv`：已评价信号的仓位、变化、下一期收益、财富倍数、增长、净值、十二个滚动矩、三个目标值、所选目标值及求解位置；
+- `signals.csv`：全部信号，包括最后一个 `pending`、原仓位、目标变化、安全域、κ、十二个矩和目标值；
+- `trades.csv`：仅保留目标仓位发生变化的模拟操作，包含开多/加多/减多/平多、开空/加空/减空/平空和双向反手；
+- `statistics.csv`：相对 M2 与买入持有的 Bootstrap、FDR 和支持状态；
+- `results.xlsx`：以上结果的 Excel 视图；
+- `conclusion.txt`：配置、方法和结论摘要。
 
-诊断区显示扣费后的平均单期与年化对数增长、触界率，以及 Kelly 模型与经验精确解的仓位差；上传策略则显示策略返回的诊断字段。最后一个没有未来收益的信号标记为 `pending`，只表示下一期目标仓位，不进入准确率或收益统计。
+网页提供策略与买入持有净值曲线、完整仓位曲线、操作变动图、模型相对经验精确 Kelly 的诊断面板，以及可分页的逐笔操作表。“逐笔”是同一标的、频率、模型和仓位类型下相邻目标仓位之差，不是券商成交回报；没有虚构成交价、股数或订单状态。`RAW` 操作会标记为研究用途，因为它可能缺失或越过交易边界；网页默认查看 `SAFE`。
 
-`--cost-bps 0` 表示毛收益研究。用于实盘可行性讨论前必须填入合理的交易成本、滑点及融资融券成本。
+没有仓位变化的时期不会生成交易。最新 pending 信号只有在相对上一期确实发生变化时才生成 pending 操作；其下一期收益和净值结果保持空白。若 `RAW` 连续性中间出现缺失，程序不会猜测缺失期间持仓，也不会跨越缺口制造一笔交易。
 
-## 数据检查
+## 计算逻辑
 
-本仓库不分发原始研究行情或历史正式输出。测试时使用自己的日频数据，或运行 `tools/fetch_fred_test_data.py` 获取公开测试序列。不要从汇总统计反推或伪造价格。
+价格转换为普通简单收益 `R=P_t/P_{t-1}-1`，同时构造对数收益 `X=log(P_t/P_{t-1})`。同一窗口计算对数原始矩 `m_k=E[X^k]`、中心矩 `ν_k=E[(X-μ)^k]` 和简单收益原始矩 `q_k=E[R^k]`。六模型各自求 `RAW`，再独立求 `BOUNDED` 和 `SAFE`。`M4_SIMPLE` 的目标为：
 
-真实 CSV 规则：
+```text
+G4(f) = q1·f - q2·f²/2 + q3·f³/3 - q4·f⁴/4
+```
 
-- `date` 必须能解析为 `YYYY-MM-DD`；
-- `symbol` 非空；
-- `adjusted_close` 必须有限且大于 0；
-- 同一标的同一天只能有一条记录；
-- 每个标的至少需要 62 个相应频率价格，才能形成 60 个估计收益和 1 个下一期评价收益。
+`EMPIRICAL_EXACT` 最大化窗口内 `mean(log(1+fR_i))`，只对该经验分布“精确”，不代表未来分布已知。Kelly 只负责在给定分布估计后决定投多少，不会创造预测能力；研究检验的是历史窗口能否代表下一期。
 
-## 防止越调越差
+财富倍数保留为 `1+fR_next`。若不大于 0，仍记录破产；统计使用 `log(max(1+fR_next,1e-12))` 给予有限惩罚。零仓位进入覆盖率和平均增长，但不进入方向准确率；非零仓位遇到零收益算方向失败。
 
-摘要把可评价时期按时间切成 `development`（前 70%）和 `holdout`（后 30%）。参数修改只看 development；策略口径锁定后才看 holdout。若看过 holdout 后继续修改，下一轮必须换新的保留区间或新数据，不能继续称为未见样本。
+## 本轮改动记录（0.6）
 
-## Kelly 为什么需要“分布”
+- 单一 `M4_SIMPLE + Half Kelly` 改为六模型统一计算；窗口改为 252/104/60。
+- 仓位改为独立 `RAW / BOUNDED / SAFE`，加入 κ 按钮、配置及完整安全域输出。
+- EODHD 改为供应商直接三频；新增三工作表 Excel 输入。
+- 删除 70/30 切分和本阶段成本扣除。
+- 增加 pending、财富可行性、破产和财富下限口径。
+- 恢复循环区块 Bootstrap、18 组 BH-FDR、相对 M2 与买入持有联合判定。
+- 输出统一为五个 CSV、一个 XLSX、一个 TXT；恢复逐笔操作、分页、净值图、完整仓位/变动图和经验精确诊断。
+- 将十二个窗口矩、目标函数值、经验精确目标损失及求解位置写入逐期与信号输出，恢复直接复算能力。
+- 增加六模型、SAFE、三频输入、统计复现、报告和网页契约测试。
+- 增加顶层策略注册表和上传模板；Kelly 作为完整模块保留内部六模型/三仓位，上传策略使用同一审计链路并输出 `TARGET`。
 
-Kelly 本身是仓位选择规则，不是预测模型。理论上它需要未来收益分布，并选择使 `E[log(1+fR)]` 最大的仓位 `f`。现实中未来分布未知，因此必须另外估计。
-
-本项目没有假设正态分布，也没有拟合真实的未来分布。六个内置模型分别检验低阶/高阶、简单收益/对数收益、零点/均值展开和经验精确目标的差异。
-
-默认 `M4_SIMPLE` 的计算是：
-
-1. 用最近 60 个同频率简单收益作为样本；
-2. 计算经验原始矩 `q_k = (1/60) Σ R_i^k`，`k=1..4`；
-3. 假设下一期的前四阶矩与这 60 期相同；
-4. 用 `log(1+fR)` 的四阶 Taylor 展开近似期望对数增长；
-5. 最大化 `G4(f)=q1*f-q2*f²/2+q3*f³/3-q4*f⁴/4`，并施加仓位边界和 Kelly 比例。
-
-选择其他 Taylor 模型时，同一个窗口仍会计算 `mean(log(1+fR_i))` 的经验精确最优解，用来回答近似目标与不截断经验目标相差多少。选择 `EMPIRICAL_EXACT` 时，它直接形成交易仓位。策略实际对数增长使用扣除已配置交易成本后的财富倍数计算；若财富倍数归零或为负，单期对数增长为空、年化几何增长记为 `-100%`，不以人为小数替代 `log(0)`。
-
-所以它并不知道真实完整分布，只使用了过去样本估计出的四个矩。策略是否有效，取决于“过去 60 期矩对下一期仍有代表性”这一假设是否成立；回测的作用正是检验这一点。
+旧版模型、窗口、仓位和统计口径均已改变，旧结果不能与 0.5 直接拼接或继续称为同一基线。
 
 ## 测试
 
 ```bash
-cd kelly-mvp
 PYTHONPATH=src python3 -m unittest discover -s tests -v
+node --check src/kelly_mvp/web_static/app.js
 ```
+
+研究结果不构成投资建议，也不等于可实盘；滑点、融资融券、税费、成交约束和组合执行仍未完整建模。

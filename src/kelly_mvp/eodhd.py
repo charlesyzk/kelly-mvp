@@ -11,6 +11,7 @@ from typing import Callable
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
+from .config import FREQUENCIES
 from .data import PriceRow
 
 
@@ -49,15 +50,19 @@ def build_eodhd_url(
     start_date: str | date,
     end_date: str | date | None,
     api_token: str,
+    frequency: str = "daily",
 ) -> str:
     normalized_symbol, start, end = validate_request(symbol, start_date, end_date)
     if not isinstance(api_token, str) or not api_token.strip():
         raise ValueError("服务端尚未配置 EODHD_API_TOKEN")
+    period = {"daily": "d", "weekly": "w", "monthly": "m"}.get(frequency)
+    if period is None:
+        raise ValueError(f"unsupported EODHD frequency: {frequency}")
     query = urlencode({
         "api_token": api_token.strip(),
         "fmt": "json",
         "order": "a",
-        "period": "d",
+        "period": period,
         "from": start.isoformat(),
         "to": end.isoformat(),
     })
@@ -65,7 +70,7 @@ def build_eodhd_url(
 
 
 def _default_transport(url: str, timeout_seconds: float) -> object:
-    request = Request(url, headers={"User-Agent": "kelly-mvp/0.4"})
+    request = Request(url, headers={"User-Agent": "kelly-mvp/0.5"})
     with urlopen(request, timeout=timeout_seconds) as response:  # nosec B310
         raw = response.read(MAX_RESPONSE_BYTES + 1)
     if len(raw) > MAX_RESPONSE_BYTES:
@@ -73,7 +78,7 @@ def _default_transport(url: str, timeout_seconds: float) -> object:
     return json.loads(raw.decode("utf-8"))
 
 
-def fetch_daily_prices(
+def fetch_prices(
     symbol: str,
     start_date: str | date,
     end_date: str | date | None = None,
@@ -81,12 +86,13 @@ def fetch_daily_prices(
     api_token: str | None = None,
     timeout_seconds: float = 30.0,
     http_transport: HttpTransport | None = None,
+    frequency: str = "daily",
 ) -> list[PriceRow]:
-    """Fetch daily adjusted closes; never includes the token in public errors."""
+    """Fetch provider-supplied adjusted closes; never expose the token."""
 
     normalized_symbol, start, end = validate_request(symbol, start_date, end_date)
     token = api_token if api_token is not None else os.getenv("EODHD_API_TOKEN", "")
-    url = build_eodhd_url(normalized_symbol, start, end, token)
+    url = build_eodhd_url(normalized_symbol, start, end, token, frequency)
     try:
         payload = (http_transport or _default_transport)(url, timeout_seconds)
     except (ValueError, json.JSONDecodeError):
@@ -122,3 +128,35 @@ def fetch_daily_prices(
         seen.add(observed)
         rows.append(PriceRow(observed, normalized_symbol, adjusted_close))
     return sorted(rows, key=lambda row: row.date)
+
+
+def fetch_daily_prices(*args, **kwargs) -> list[PriceRow]:
+    """Backward-compatible daily adapter."""
+
+    kwargs["frequency"] = "daily"
+    return fetch_prices(*args, **kwargs)
+
+
+def fetch_price_bundle(
+    symbol: str,
+    start_date: str | date,
+    end_date: str | date | None = None,
+    *,
+    api_token: str | None = None,
+    timeout_seconds: float = 30.0,
+    http_transport: HttpTransport | None = None,
+) -> dict[str, list[PriceRow]]:
+    """Fetch EODHD's own daily, weekly and monthly adjusted-close series."""
+
+    return {
+        frequency: fetch_prices(
+            symbol,
+            start_date,
+            end_date,
+            api_token=api_token,
+            timeout_seconds=timeout_seconds,
+            http_transport=http_transport,
+            frequency=frequency,
+        )
+        for frequency in FREQUENCIES
+    }

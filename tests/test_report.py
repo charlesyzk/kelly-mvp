@@ -1,35 +1,51 @@
 import tempfile
 import unittest
 from datetime import date, timedelta
-from pathlib import Path
 
-from kelly_mvp import PriceRow, StrategyConfig, run_backtest
+from openpyxl import load_workbook
+
+from kelly_mvp import PriceRow, StrategyConfig, load_user_strategy, run_backtest
 from kelly_mvp.report import write_outputs
 
 
 class ReportTests(unittest.TestCase):
-    def test_writes_auditable_outputs(self):
-        observed = date(2020, 1, 1)
-        rows = []
-        price = 100.0
-        while len(rows) < 90:
-            if observed.weekday() < 5:
-                rows.append(PriceRow(observed, "X", price))
-                price *= 1.001
-            observed += timedelta(days=1)
-        config = StrategyConfig(windows={"daily": 5, "weekly": 2, "monthly": 2})
-        result = run_backtest(rows, config)
+    def test_writes_csv_excel_and_text_outputs(self):
+        rows = [PriceRow(date(2020,1,1)+timedelta(days=i), "X", 100*1.001**i) for i in range(18)]
+        config = StrategyConfig(
+            windows={"daily":5,"weekly":3,"monthly":2},
+            minimum_matches={"daily":3,"weekly":2,"monthly":1},
+            bootstrap_blocks={"daily":2,"weekly":2,"monthly":1},
+            bootstrap_repetitions=20,
+        )
+        result = run_backtest({name: rows for name in ("daily","weekly","monthly")}, config)
         with tempfile.TemporaryDirectory() as directory:
-            summary, periods, signals, trades, report = write_outputs(result, directory)
-            self.assertTrue(summary.is_file())
-            self.assertTrue(periods.is_file())
-            self.assertTrue(trades.is_file())
-            self.assertTrue(signals.is_file())
-            self.assertIn("M4_SIMPLE · 策略验证报告", report.read_text(encoding="utf-8"))
-            self.assertIn("direction_accuracy", summary.read_text(encoding="utf-8-sig"))
-            self.assertIn("position_change", trades.read_text(encoding="utf-8-sig"))
-            self.assertIn("pending", signals.read_text(encoding="utf-8-sig"))
-            self.assertIn("strategy_id", periods.read_text(encoding="utf-8-sig"))
+            paths = write_outputs(result, directory, config)
+            self.assertEqual(len(paths), 7)
+            self.assertTrue(all(path.is_file() for path in paths))
+            workbook = load_workbook(paths[5], read_only=True)
+            self.assertEqual(set(workbook.sheetnames), {"summary","statistics","signals","periods","trades"})
+            self.assertIn("5% 正式支持", paths[6].read_text(encoding="utf-8"))
+            self.assertIn("position_type", paths[2].read_text(encoding="utf-8-sig"))
+            self.assertIn("action", paths[3].read_text(encoding="utf-8-sig"))
+
+    def test_uploaded_strategy_report_marks_kelly_statistics_not_applicable(self):
+        rows = [PriceRow(date(2020,1,1)+timedelta(days=i), "X", 100+i) for i in range(12)]
+        config = StrategyConfig(
+            windows={"daily":5,"weekly":2,"monthly":2},
+            minimum_matches={"daily":3,"weekly":1,"monthly":1},
+            bootstrap_blocks={"daily":2,"weekly":1,"monthly":1},
+            bootstrap_repetitions=10,
+        )
+        strategy = load_user_strategy(
+            'STRATEGY_META={"id":"quarter","name":"Quarter"}\ndef decide(context): return 0.25'
+        )
+        result = run_backtest({name: rows for name in ("daily","weekly","monthly")}, config, strategy)
+        with tempfile.TemporaryDirectory() as directory:
+            paths = write_outputs(result, directory, config)
+            conclusion = paths[6].read_text(encoding="utf-8")
+            self.assertIn("用户策略样本外验证：Quarter", conclusion)
+            self.assertIn("Bootstrap 和 BH-FDR：不适用", conclusion)
+            self.assertIn("TARGET", paths[0].read_text(encoding="utf-8-sig"))
 
 
 if __name__ == "__main__":

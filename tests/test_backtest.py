@@ -1,114 +1,69 @@
 import unittest
 from datetime import date, timedelta
 
-from kelly_mvp import PriceRow, StrategyConfig, run_backtest
-from kelly_mvp.backtest import classify_trade
-from kelly_mvp.module_strategy import load_user_strategy
+from kelly_mvp import PriceRow, StrategyConfig, classify_trade, load_user_strategy, run_backtest
+
+
+def prices(count=90, growth=1.001):
+    return [PriceRow(date(2020, 1, 1) + timedelta(days=i), "X", 100 * growth**i) for i in range(count)]
 
 
 class BacktestTests(unittest.TestCase):
     def test_trade_actions_cover_open_adjust_reverse_and_close(self):
         cases = {
-            (0.0, 0.4): "open_long",
-            (0.0, -0.4): "open_short",
-            (0.4, 0.6): "add_long",
-            (0.6, 0.2): "reduce_long",
-            (-0.4, -0.6): "add_short",
-            (-0.6, -0.2): "cover_short",
-            (0.4, -0.2): "reverse_to_short",
-            (-0.4, 0.2): "reverse_to_long",
-            (0.4, 0.0): "close_long",
-            (-0.4, 0.0): "close_short",
+            (0.0, 0.4): "open_long", (0.4, 0.7): "add_long",
+            (0.7, 0.2): "reduce_long", (0.2, 0.0): "close_long",
+            (0.0, -0.4): "open_short", (-0.4, -0.7): "add_short",
+            (-0.7, -0.2): "cover_short", (-0.2, 0.0): "close_short",
+            (-0.4, 0.3): "reverse_to_long", (0.4, -0.3): "reverse_to_short",
         }
         for positions, expected in cases.items():
             self.assertEqual(classify_trade(*positions), expected)
         self.assertIsNone(classify_trade(0.2, 0.2))
+        self.assertIsNone(classify_trade(None, 0.2))
 
-    def test_signal_uses_prior_window_and_next_return(self):
-        start = date(2020, 1, 1)
-        rows = []
-        observed = start
-        price = 100.0
-        while len(rows) < 90:
-            if observed.weekday() < 5:
-                rows.append(PriceRow(observed, "X", price))
-                price *= 1.001
-            observed += timedelta(days=1)
-        result = run_backtest(rows, StrategyConfig(windows={"daily": 60, "weekly": 2, "monthly": 2}))
+    def config(self):
+        return StrategyConfig(
+            windows={"daily": 5, "weekly": 3, "monthly": 2},
+            minimum_matches={"daily": 3, "weekly": 2, "monthly": 1},
+            bootstrap_blocks={"daily": 2, "weekly": 2, "monthly": 1},
+            bootstrap_repetitions=20,
+        )
+
+    def test_generates_six_models_and_three_positions(self):
+        result = run_backtest(prices(), self.config())
         daily = [row for row in result.periods if row.frequency == "daily"]
-        self.assertTrue(daily)
+        self.assertEqual({row.model_id for row in daily}, {"M2_LOG","M3_LOG","M4_LOG_ZERO","M4_SIMPLE","M4_LOG_MEAN","EMPIRICAL_EXACT"})
+        self.assertEqual({row.position_type for row in daily}, {"RAW","BOUNDED","SAFE"})
         first = daily[0]
-        self.assertEqual(first.signal_date, rows[60].date)
-        self.assertEqual(first.return_date, rows[61].date)
-        self.assertEqual(first.window_end_date, first.signal_date)
-        self.assertGreater(first.position, 0)
-        self.assertEqual(first.previous_position, 0)
-        self.assertAlmostEqual(first.position_change, first.position)
-        self.assertTrue(first.direction_correct)
-        first_trade = next(row for row in result.trades if row.frequency == "daily")
-        self.assertEqual(first_trade.action, "open_long")
-        self.assertAlmostEqual(first_trade.target_position, first.position)
-        daily_signals = [row for row in result.signals if row.frequency == "daily"]
-        self.assertEqual(daily_signals[-1].signal_date, rows[-1].date)
-        self.assertEqual(daily_signals[-1].evaluation_status, "pending")
-        self.assertEqual(len(daily_signals), len(daily) + 1)
+        self.assertEqual(first.signal_date, date(2020, 1, 6))
+        self.assertEqual(first.return_date, date(2020, 1, 7))
+        self.assertTrue(all(hasattr(first, name) for name in ("m1","m2","m3","m4","mu","nu2","nu3","nu4","q1","q2","q3","q4")))
+        self.assertTrue(result.trades)
+        self.assertEqual({row.position_type for row in result.trades}, {"RAW","BOUNDED","SAFE"})
 
-    def test_zero_realized_return_is_not_forced_into_accuracy_denominator(self):
-        start = date(2020, 1, 1)
-        rows = []
-        observed = start
-        price = 100.0
-        while len(rows) < 12:
-            if observed.weekday() < 5:
-                rows.append(PriceRow(observed, "X", price))
-                if len(rows) < 11:
-                    price *= 1.01
-            observed += timedelta(days=1)
-        config = StrategyConfig(windows={"daily": 5, "weekly": 2, "monthly": 2})
-        result = run_backtest(rows, config)
-        daily = [row for row in result.periods if row.frequency == "daily"]
-        self.assertIsNone(daily[-1].direction_correct)
-        summary = next(
-            row for row in result.summaries if row.frequency == "daily" and row.segment == "all"
-        )
-        self.assertEqual(summary.direction_observations, summary.active_observations - 1)
-        self.assertGreaterEqual(summary.mean_abs_exact_kelly_gap, 0)
-        self.assertGreaterEqual(summary.boundary_rate, 0)
-        self.assertLessEqual(summary.boundary_rate, 1)
+    def test_pending_signal_is_not_evaluated(self):
+        direct_prices = {frequency: prices() for frequency in ("daily", "weekly", "monthly")}
+        result = run_backtest(direct_prices, self.config())
+        pending = [row for row in result.signals if row.evaluation_status == "pending"]
+        self.assertEqual(len(pending), 6 * 3 * 3)
+        self.assertTrue(any(row.evaluation_status == "pending" for row in result.trades))
 
-    def test_bankruptcy_does_not_turn_log_zero_into_a_finite_number(self):
-        start = date(2020, 1, 1)
-        rows = [PriceRow(start, "X", 100.0)]
-        for index in range(1, 61):
-            rows.append(PriceRow(start + timedelta(days=index), "X", rows[-1].adjusted_close * 0.99))
-        rows.append(PriceRow(start + timedelta(days=61), "X", rows[-1].adjusted_close * 3))
-        result = run_backtest(rows)
-        daily = [row for row in result.periods if row.frequency == "daily"]
-        self.assertEqual(len(daily), 1)
-        self.assertTrue(daily[0].bankrupt)
-        self.assertIsNone(daily[0].log_growth)
-        summary = next(
-            row for row in result.summaries if row.frequency == "daily" and row.segment == "all"
-        )
-        self.assertIsNone(summary.average_log_growth)
-        self.assertEqual(summary.annualized_log_growth, -1.0)
+    def test_zero_return_is_unsuccessful_for_nonzero_position(self):
+        rows = prices(12)
+        rows[-1] = PriceRow(rows[-1].date, "X", rows[-2].adjusted_close)
+        result = run_backtest(rows, self.config())
+        candidates = [row for row in result.periods if row.frequency == "daily" and row.return_date == rows[-1].date and row.position_value not in (None, 0)]
+        self.assertTrue(candidates)
+        self.assertTrue(all(row.direction_success is False for row in candidates))
 
-    def test_summary_contains_development_holdout_and_all(self):
-        start = date(2010, 1, 1)
-        rows = []
-        observed = start
-        price = 100.0
-        while len(rows) < 1800:
-            if observed.weekday() < 5:
-                rows.append(PriceRow(observed, "X", price))
-                price *= 1.0002
-            observed += timedelta(days=1)
-        result = run_backtest(rows)
-        segments = {(row.frequency, row.segment) for row in result.summaries}
-        for frequency in ("daily", "weekly", "monthly"):
-            self.assertIn((frequency, "development"), segments)
-            self.assertIn((frequency, "holdout"), segments)
-            self.assertIn((frequency, "all"), segments)
+    def test_bankruptcy_receives_wealth_floor_penalty(self):
+        rows = [PriceRow(date(2020,1,1)+timedelta(days=i), "X", 100*(0.99**i)) for i in range(8)]
+        rows.append(PriceRow(date(2020,1,9), "X", rows[-1].adjusted_close*3))
+        result = run_backtest(rows, self.config())
+        bankrupt = [row for row in result.periods if row.bankrupt]
+        self.assertTrue(bankrupt)
+        self.assertTrue(all(row.truncated_log_growth is not None for row in bankrupt))
 
     def test_uploaded_strategy_runs_through_the_same_no_lookahead_backtest(self):
         source = '''
@@ -122,10 +77,15 @@ def decide(context):
         result = run_backtest(rows, config, load_user_strategy(source))
         daily = [row for row in result.periods if row.frequency == "daily"]
         self.assertTrue(daily)
-        self.assertTrue(all(row.strategy_id == "always_long_quarter" for row in daily))
-        self.assertTrue(all(row.position == 0.25 for row in daily))
+        self.assertTrue(all(row.model_id == "always_long_quarter" for row in daily))
+        self.assertTrue(all(row.position_type == "TARGET" for row in daily))
+        self.assertTrue(all(row.position_value == 0.25 for row in daily))
         self.assertEqual(daily[0].diagnostics["last_visible_price"], rows[5].adjusted_close)
         self.assertEqual(daily[0].return_date, rows[6].date)
+        self.assertEqual(
+            [row.evaluation_status for row in result.signals if row.frequency == "daily"][-1],
+            "pending",
+        )
 
 
 if __name__ == "__main__":

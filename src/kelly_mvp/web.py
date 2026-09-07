@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
 import json
 import os
 from dataclasses import asdict
@@ -14,39 +16,64 @@ from typing import Any
 
 from .backtest import run_backtest
 from .config import StrategyConfig
-from .data import daily_prices_to_csv, parse_daily_prices
+from .data import daily_prices_to_csv, parse_daily_prices, parse_price_workbook
 from .demo import generate_demo_csv
-from .eodhd import fetch_daily_prices
-from .module_strategy import get_builtin_strategy, load_user_strategy, strategy_catalog
+from .eodhd import fetch_price_bundle
+from .module_strategy import (
+    KELLY_STRATEGY_ID,
+    get_builtin_strategy,
+    load_user_strategy,
+    strategy_catalog,
+)
+from .statistics import compare_models
 
 
 STATIC_DIR = Path(__file__).with_name("web_static")
 STRATEGY_TEMPLATE = Path(__file__).with_name("module_strategy") / "user_strategy_template.py"
-MAX_REQUEST_BYTES = 25 * 1024 * 1024
+MAX_REQUEST_BYTES = 35 * 1024 * 1024
 
 
 def calculate_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    csv_text = payload.get("csv_text")
-    if not isinstance(csv_text, str):
-        raise ValueError("没有收到 CSV 文件内容")
     try:
-        fraction = float(payload.get("kelly_fraction", 0.5))
-        cost_bps = float(payload.get("transaction_cost_bps", 0.0))
+        kappa = float(payload.get("convergence_kappa", 0.8))
     except (TypeError, ValueError) as exc:
-        raise ValueError("Kelly比例和交易成本必须是数字") from exc
-    config = StrategyConfig(kelly_fraction=fraction, transaction_cost_bps=cost_bps)
-    strategy_id = payload.get("strategy_id", "M4_SIMPLE")
+        raise ValueError("κ 必须是 0 与 1 之间的数字") from exc
+    workbook_b64 = payload.get("workbook_b64")
+    series = payload.get("price_series")
+    if isinstance(workbook_b64, str):
+        try:
+            prices = parse_price_workbook(base64.b64decode(workbook_b64, validate=True))
+        except (binascii.Error, ValueError) as exc:
+            raise ValueError(f"Excel 文件无法读取：{exc}") from exc
+    elif isinstance(series, dict):
+        parsed = {
+            frequency: parse_daily_prices(text)
+            for frequency, text in series.items()
+            if frequency in {"daily", "weekly", "monthly"} and isinstance(text, str)
+        }
+        if not parsed:
+            raise ValueError("没有收到可用的分频行情")
+        prices = parsed
+    else:
+        csv_text = payload.get("csv_text")
+        if not isinstance(csv_text, str):
+            raise ValueError("没有收到 CSV 文件内容")
+        prices = parse_daily_prices(csv_text)
+    config = StrategyConfig(convergence_kappa=kappa)
+    strategy_id = payload.get("strategy_id", KELLY_STRATEGY_ID)
     if strategy_id == "uploaded":
         source = payload.get("strategy_source")
         if not isinstance(source, str):
             raise ValueError("请选择要上传的 Python 策略文件")
-        filename = payload.get("strategy_filename", "uploaded_strategy.py")
-        strategy = load_user_strategy(source, str(filename))
-    elif isinstance(strategy_id, str):
-        strategy = get_builtin_strategy(strategy_id)
+        strategy = load_user_strategy(
+            source,
+            str(payload.get("strategy_filename", "uploaded_strategy.py")),
+        )
+    elif strategy_id == KELLY_STRATEGY_ID:
+        strategy = get_builtin_strategy(KELLY_STRATEGY_ID)
     else:
-        raise ValueError("策略编号格式不正确")
-    result = run_backtest(parse_daily_prices(csv_text), config, strategy)
+        raise ValueError("未知的顶层策略")
+    result = run_backtest(prices, config, strategy)
     if not result.periods:
         detail = "；".join(result.issues) or "数据不足"
         raise ValueError(f"没有产生可评价结果：{detail}")
@@ -54,15 +81,19 @@ def calculate_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "strategy": strategy.public_dict(),
         "config": {
             "windows": config.windows,
-            "kelly_fraction": config.kelly_fraction,
             "bounds": [config.lower_bound, config.upper_bound],
-            "transaction_cost_bps": config.transaction_cost_bps,
-            "development_fraction": config.development_fraction,
+            "convergence_kappa": config.convergence_kappa,
+            "wealth_floor": config.wealth_floor,
         },
         "summaries": [asdict(row) for row in result.summaries],
         "periods": [asdict(row) for row in result.periods],
         "signals": [asdict(row) for row in result.signals],
         "trades": [asdict(row) for row in result.trades],
+        "statistics": (
+            [asdict(row) for row in compare_models(result, config)]
+            if strategy.kind == "builtin_kelly_suite"
+            else []
+        ),
         "issues": list(result.issues),
     }
 
@@ -79,19 +110,20 @@ def fetch_eodhd_payload(payload: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("请输入EODHD代码")
     if not isinstance(start_date, str) or not start_date.strip():
         raise ValueError("请选择开始日期")
-    rows = fetch_daily_prices(symbol, start_date, end_date)
+    bundle = fetch_price_bundle(symbol, start_date, end_date)
+    daily = bundle["daily"]
     return {
-        "csv_text": daily_prices_to_csv(rows),
-        "symbol": rows[0].symbol,
-        "rows": len(rows),
-        "first_date": rows[0].date,
-        "last_date": rows[-1].date,
+        "price_series": {frequency: daily_prices_to_csv(rows) for frequency, rows in bundle.items()},
+        "symbol": daily[0].symbol,
+        "rows": {frequency: len(rows) for frequency, rows in bundle.items()},
+        "first_date": daily[0].date,
+        "last_date": daily[-1].date,
         "source": "EODHD",
     }
 
 
 class KellyRequestHandler(BaseHTTPRequestHandler):
-    server_version = "StrategyLab/0.5"
+    server_version = "StrategyLab/0.6"
 
     def _send_bytes(self, status: int, content_type: str, body: bytes) -> None:
         self.send_response(status)
@@ -162,7 +194,7 @@ class KellyRequestHandler(BaseHTTPRequestHandler):
             if length <= 0:
                 raise ValueError("请求内容为空")
             if length > MAX_REQUEST_BYTES:
-                raise ValueError("文件过大，当前上限为25MB")
+                raise ValueError("文件过大，当前请求上限为35MB")
             raw = self.rfile.read(length)
             payload = json.loads(raw.decode("utf-8"))
             if not isinstance(payload, dict):

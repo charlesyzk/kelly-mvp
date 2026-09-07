@@ -1,53 +1,52 @@
-const state = {
-  csvText: "", filename: "", result: null, symbol: "", segment: "all",
-  tradeFrequency: "daily", tradePage: 0, tradePageSize: 20,
-  strategySource: "", strategyFilename: "", strategyId: "M4_SIMPLE",
-};
-
+const state = { csvText: "", workbookBase64: null, priceSeries: null, strategyId: "KELLY_SIX_MODEL", strategySource: "", strategyFilename: "", result: null, tradePage: 0, tradePageSize: 25 };
+let kappaTimer = null;
 const $ = (selector) => document.querySelector(selector);
-const fileInput = $("#file-input");
-const dropZone = $("#drop-zone");
 const runButton = $("#run-button");
 const status = $("#status");
-const eodhdFetchButton = $("#eodhd-fetch");
 const strategySelect = $("#strategy-select");
 const strategyFile = $("#strategy-file");
+const escapeHtml = (value) => String(value).replace(/[&<>'"]/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[c]));
+const pct = (value) => value == null ? "—" : `${(Number(value) * 100).toFixed(2)}%`;
+const num = (value, digits=4) => value == null ? "—" : Number(value).toFixed(digits);
 
-const strategyDescriptions = {
-  M2_LOG: "对数收益二阶 Taylor 基准；使用均值与二阶风险。",
-  M3_LOG: "在二阶基准上加入对数收益三阶矩。",
-  M4_LOG_ZERO: "围绕零点展开的四阶对数收益 Kelly。",
-  M4_SIMPLE: "简单收益四阶 Taylor Kelly；保持当前项目既有口径。",
-  M4_LOG_MEAN: "围绕样本均值展开的四阶对数收益 Kelly。",
-  EMPIRICAL_EXACT: "直接最大化窗口经验样本的平均精确对数增长。",
-  uploaded: "按模板上传本地 Python 策略；回测、成本和指标仍由框架统一计算。",
-};
+function setSource(text, name, series=null, workbookBase64=null) {
+  state.csvText = text || ""; state.priceSeries = series; state.workbookBase64 = workbookBase64;
+  $("#file-label").textContent = name; updateRunAvailability();
+  status.className = "status"; status.textContent = "行情已加载，尚未计算。";
+}
 
+function hasPriceSource() { return Boolean(state.csvText || state.workbookBase64 || state.priceSeries); }
 function updateRunAvailability() {
-  runButton.disabled = !state.csvText || (state.strategyId === "uploaded" && !state.strategySource);
+  runButton.disabled = !hasPriceSource() || (state.strategyId === "uploaded" && !state.strategySource);
 }
-
-document.querySelectorAll(".ticks").forEach((el) => {
-  el.title = "60 个同频率收益观测";
-});
-
-function setFile(text, name) {
-  state.csvText = text;
-  state.filename = name;
-  $("#file-label").textContent = name;
-  updateRunAvailability();
-  status.className = "status";
-  const lines = Math.max(0, text.trim().split(/\r?\n/).length - 1);
-  status.textContent = `已读取 ${lines.toLocaleString("zh-CN")} 行，尚未计算。`;
-}
-
-strategySelect.addEventListener("change", () => {
-  state.strategyId = strategySelect.value;
+function applyStrategyMode() {
   const uploaded = state.strategyId === "uploaded";
   $("#strategy-upload").hidden = !uploaded;
-  $("#kelly-fraction-field").hidden = uploaded;
-  $("#strategy-description").textContent = strategyDescriptions[state.strategyId] || "";
+  $("#kelly-controls").hidden = uploaded;
+  $("#position-rule").querySelector("span").textContent = uploaded ? "上传策略仓位" : "Kelly 内部仓位";
+  $("#position-rule").querySelector("strong").textContent = uploaded ? "TARGET" : "RAW · BOUNDED · SAFE";
+  $("#strategy-description").textContent = uploaded
+    ? "按模板上传可信 Python 策略；框架统一完成无前视的下一期验证。"
+    : "完整运行六个 Kelly 模型及 RAW、BOUNDED、SAFE 三类独立仓位。";
+  $("#logic-title").textContent = uploaded ? "一个目标仓位，同一套验证链路" : "六个目标函数，三种独立求解";
+  $("#logic-caption").textContent = uploaded
+    ? "策略只读取当前窗口 · 框架限制仓位 · 下一期结果独立评价"
+    : "RAW 看模型原始倾向 · BOUNDED 限制敞口 · SAFE 再限制 Taylor 收敛域";
+  $("#empty-copy").textContent = uploaded
+    ? "加载策略和行情后，查看 TARGET 仓位的真实逐期计算。"
+    : "加载行情后，选择模型、仓位类型和频率查看真实逐期计算。";
+  status.textContent = hasPriceSource()
+    ? uploaded && !state.strategySource ? "行情已加载；请再上传策略文件。" : "行情已加载，尚未计算。"
+    : uploaded ? "先上传策略并加载行情，再运行验证。" : "先加载行情，再运行六模型验证。";
+  runButton.querySelector("span").textContent = uploaded ? "运行上传策略" : "按当前 κ 计算";
   updateRunAvailability();
+}
+strategySelect.addEventListener("change", () => {
+  state.strategyId = strategySelect.value;
+  state.result = null;
+  $("#results").hidden = true;
+  $("#empty-state").hidden = false;
+  applyStrategyMode();
 });
 
 strategyFile.addEventListener("change", async () => {
@@ -67,6 +66,7 @@ strategyFile.addEventListener("change", async () => {
   status.textContent = `已加载策略 ${file.name}；选择或拉取行情后即可计算。`;
   updateRunAvailability();
 });
+applyStrategyMode();
 
 document.querySelectorAll(".source-tabs button").forEach((button) => button.addEventListener("click", () => {
   document.querySelectorAll(".source-tabs button").forEach((item) => item.classList.toggle("active", item === button));
@@ -74,356 +74,168 @@ document.querySelectorAll(".source-tabs button").forEach((button) => button.addE
   $("#eodhd-source").hidden = button.dataset.source !== "eodhd";
 }));
 
-async function checkEodhdStatus() {
-  const note = $("#eodhd-config-status");
-  try {
-    const response = await fetch("/api/eodhd/status");
-    const data = await response.json();
-    note.className = data.configured ? "api-note ready" : "api-note error";
-    note.textContent = data.configured
-      ? "服务端 Token 已配置；密钥不会发送到浏览器。"
-      : "服务端未配置 EODHD_API_TOKEN。";
-    eodhdFetchButton.disabled = !data.configured;
-  } catch (_error) {
-    note.className = "api-note error";
-    note.textContent = "无法检查 EODHD 配置状态。";
-    eodhdFetchButton.disabled = true;
-  }
-}
-
-checkEodhdStatus();
-
 async function readFile(file) {
   if (!file) return;
-  if (!file.name.toLowerCase().endsWith(".csv")) {
-    status.className = "status error";
-    status.textContent = "请选择 .csv 文件。";
-    return;
+  const lower = file.name.toLowerCase();
+  if (lower.endsWith(".xlsx")) {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    let binary = "";
+    for (let i=0; i<bytes.length; i+=0x8000) binary += String.fromCharCode(...bytes.subarray(i,i+0x8000));
+    setSource("", file.name, null, btoa(binary)); return;
   }
-  setFile(await file.text(), file.name);
+  if (!lower.endsWith(".csv")) {
+    status.className = "status error"; status.textContent = "请选择 CSV 或 XLSX。"; return;
+  }
+  setSource(await file.text(), file.name);
 }
-
-fileInput.addEventListener("change", () => readFile(fileInput.files[0]));
-["dragenter", "dragover"].forEach((eventName) => dropZone.addEventListener(eventName, (event) => {
-  event.preventDefault(); dropZone.classList.add("dragging");
-}));
-["dragleave", "drop"].forEach((eventName) => dropZone.addEventListener(eventName, (event) => {
-  event.preventDefault(); dropZone.classList.remove("dragging");
-}));
-dropZone.addEventListener("drop", (event) => readFile(event.dataTransfer.files[0]));
-
+$("#file-input").addEventListener("change", (event) => readFile(event.target.files[0]));
+["dragenter","dragover"].forEach((name) => $("#drop-zone").addEventListener(name, (event) => { event.preventDefault(); event.currentTarget.classList.add("dragging"); }));
+["dragleave","drop"].forEach((name) => $("#drop-zone").addEventListener(name, (event) => { event.preventDefault(); event.currentTarget.classList.remove("dragging"); }));
+$("#drop-zone").addEventListener("drop", (event) => readFile(event.dataTransfer.files[0]));
 $("#demo-button").addEventListener("click", async () => {
-  status.className = "status";
-  status.textContent = "正在载入合成演示数据…";
-  try {
-    const response = await fetch("/demo.csv");
-    if (!response.ok) throw new Error((await response.json()).error);
-    setFile(await response.text(), "SYNTHETIC_DEMO.csv");
-  } catch (error) {
-    status.className = "status error";
-    status.textContent = error.message;
-  }
+  const response = await fetch("/demo.csv"); setSource(await response.text(), "SYNTHETIC_DEMO.csv");
 });
 
-eodhdFetchButton.addEventListener("click", async () => {
-  eodhdFetchButton.disabled = true;
-  const originalText = eodhdFetchButton.textContent;
-  eodhdFetchButton.textContent = "正在连接 EODHD…";
-  status.className = "status";
-  status.textContent = "正在从 EODHD 拉取真实日线；策略计算仍在本机完成。";
+async function checkEodhd() {
+  const note = $("#eodhd-config-status");
   try {
-    const response = await fetch("/api/eodhd/prices", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        symbol: $("#eodhd-symbol").value,
-        start_date: $("#eodhd-from").value,
-        end_date: $("#eodhd-to").value,
-      }),
-    });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error || "EODHD取数失败");
-    setFile(data.csv_text, `${data.symbol}_${data.first_date}_${data.last_date}_EODHD.csv`);
-    status.textContent = `EODHD 已返回 ${data.rows.toLocaleString("zh-CN")} 条真实日线（${data.first_date} 至 ${data.last_date}），可以开始计算。`;
-  } catch (error) {
-    status.className = "status error";
-    status.textContent = error.message;
-  } finally {
-    eodhdFetchButton.disabled = false;
-    eodhdFetchButton.textContent = originalText;
-  }
+    const data = await (await fetch("/api/eodhd/status")).json();
+    note.className = data.configured ? "api-note ready" : "api-note error";
+    note.textContent = data.configured ? "Token 已配置；密钥不会发送到浏览器。" : "服务端未配置 EODHD_API_TOKEN。";
+    $("#eodhd-fetch").disabled = !data.configured;
+  } catch (_) { note.className = "api-note error"; note.textContent = "无法检查 EODHD 配置。"; }
+}
+checkEodhd();
+
+$("#eodhd-fetch").addEventListener("click", async (event) => {
+  const button = event.currentTarget; button.disabled = true; status.textContent = "正在分别拉取日、周、月行情…";
+  try {
+    const response = await fetch("/api/eodhd/prices", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({symbol:$("#eodhd-symbol").value,start_date:$("#eodhd-from").value,end_date:$("#eodhd-to").value})});
+    const data = await response.json(); if (!response.ok) throw new Error(data.error || "EODHD 取数失败");
+    setSource("", `${data.symbol} · EODHD 三频`, data.price_series);
+    status.textContent = `已加载日 ${data.rows.daily}、周 ${data.rows.weekly}、月 ${data.rows.monthly} 条。`;
+  } catch (error) { status.className = "status error"; status.textContent = error.message; }
+  finally { button.disabled = false; }
 });
+
+function setKappa(value) {
+  $("#kappa").value = value; $("#kappa-value").textContent = Number(value).toFixed(2);
+  document.querySelectorAll("[data-kappa]").forEach((b) => b.classList.toggle("active", Number(b.dataset.kappa) === Number(value)));
+  if (state.result && state.strategyId === "KELLY_SIX_MODEL") {
+    status.textContent = "κ 已改变，正在准备自动重算…";
+    clearTimeout(kappaTimer);
+    kappaTimer = setTimeout(() => runButton.click(), 450);
+  }
+}
+$("#kappa").addEventListener("input", (event) => setKappa(event.target.value));
+document.querySelectorAll("[data-kappa]").forEach((button) => button.addEventListener("click", () => setKappa(button.dataset.kappa)));
 
 runButton.addEventListener("click", async () => {
-  runButton.disabled = true;
-  runButton.classList.add("loading");
-  runButton.querySelector("span").textContent = "正在滚动计算";
-  status.className = "status";
-  status.textContent = "正在生成日、周、月仓位并验证下一期…";
+  const uploaded = state.strategyId === "uploaded";
+  runButton.disabled = true; status.className = "status"; status.textContent = uploaded ? "正在运行上传策略…" : "正在运行六模型与三类仓位…";
   try {
-    const response = await fetch("/api/backtest", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        csv_text: state.csvText,
-        strategy_id: state.strategyId,
-        strategy_source: state.strategyId === "uploaded" ? state.strategySource : undefined,
-        strategy_filename: state.strategyId === "uploaded" ? state.strategyFilename : undefined,
-        kelly_fraction: Number($("#fraction").value),
-        transaction_cost_bps: Number($("#cost").value),
-      }),
-    });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error || "计算失败");
+    const payload = {strategy_id:state.strategyId, convergence_kappa:Number($("#kappa").value)};
+    if (uploaded) {
+      payload.strategy_source = state.strategySource;
+      payload.strategy_filename = state.strategyFilename;
+    }
+    if (state.workbookBase64) payload.workbook_b64 = state.workbookBase64;
+    else if (state.priceSeries) payload.price_series = state.priceSeries;
+    else payload.csv_text = state.csvText;
+    const response = await fetch("/api/backtest", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
+    const data = await response.json(); if (!response.ok) throw new Error(data.error || "计算失败");
     state.result = data;
-    const symbols = [...new Set(data.summaries.map((row) => row.symbol))];
-    state.symbol = symbols[0];
-    state.tradeFrequency = "daily";
-    state.tradePage = 0;
-    $("#symbol-select").innerHTML = symbols.map((symbol) => `<option>${escapeHtml(symbol)}</option>`).join("");
-    $("#empty-state").hidden = true;
-    $("#results").hidden = false;
-    $("#active-strategy").textContent = `${data.strategy.name} · v${data.strategy.version}`;
-    render();
-    status.textContent = `${data.strategy.name} 完成 ${data.periods.length.toLocaleString("zh-CN")} 次样本外评价。`;
-    $("#results").scrollIntoView({ behavior: "smooth", block: "start" });
-  } catch (error) {
-    status.className = "status error";
-    status.textContent = error.message;
-  } finally {
-    runButton.disabled = false;
-    runButton.classList.remove("loading");
-    runButton.querySelector("span").textContent = "重新计算";
-  }
+    fillSelect("#symbol-select", [...new Set(data.summaries.map((r) => r.symbol))]);
+    fillSelect("#model-select", [...new Set(data.summaries.map((r) => r.model_id))]);
+    fillSelect("#position-select", [...new Set(data.summaries.map((r) => r.position_type))]);
+    if (!uploaded) { $("#model-select").value = "M4_SIMPLE"; $("#position-select").value = "SAFE"; }
+    $("#download-statistics").hidden = uploaded;
+    $("#empty-state").hidden = true; $("#results").hidden = false; render();
+    status.textContent = uploaded
+      ? `完成 ${data.periods.length.toLocaleString("zh-CN")} 行逐期评价；策略 ${data.strategy.name}。`
+      : `完成 ${data.periods.length.toLocaleString("zh-CN")} 行逐期评价；κ=${data.config.convergence_kappa}。`;
+  } catch (error) { status.className = "status error"; status.textContent = error.message; }
+  finally { updateRunAvailability(); runButton.querySelector("span").textContent = uploaded ? "重新运行上传策略" : "按当前 κ 重新计算"; }
 });
 
-$("#symbol-select").addEventListener("change", (event) => {
-  state.symbol = event.target.value; state.tradePage = 0; render();
-});
-document.querySelectorAll(".segment-tabs button").forEach((button) => button.addEventListener("click", () => {
-  state.segment = button.dataset.segment;
-  state.tradePage = 0;
-  document.querySelectorAll(".segment-tabs button").forEach((item) => item.classList.toggle("active", item === button));
-  render();
-}));
-document.querySelectorAll("#trade-frequency-tabs button").forEach((button) => button.addEventListener("click", () => {
-  state.tradeFrequency = button.dataset.frequency;
-  state.tradePage = 0;
-  document.querySelectorAll("#trade-frequency-tabs button").forEach((item) => item.classList.toggle("active", item === button));
-  renderPositionWorkbench();
-}));
+function fillSelect(selector, values) { $(selector).innerHTML = values.map((v) => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join(""); }
+["#symbol-select","#model-select","#position-select","#frequency-select"].forEach((selector) => $(selector).addEventListener("change", () => { state.tradePage = 0; render(); }));
 $("#trade-prev").addEventListener("click", () => { state.tradePage -= 1; renderTradeTable(); });
 $("#trade-next").addEventListener("click", () => { state.tradePage += 1; renderTradeTable(); });
 
-function escapeHtml(value) {
-  return String(value).replace(/[&<>'"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[char]));
-}
-function pct(value) { return value == null ? "—" : `${(value * 100).toFixed(2)}%`; }
-function number(value, digits = 2) { return value == null ? "—" : Number(value).toFixed(digits); }
-function bps(value) { return value == null ? "—" : `${(Number(value) * 10000).toFixed(2)} bps`; }
-function frequencyName(value) { return ({ daily: "日频", weekly: "周频", monthly: "月频" })[value]; }
-function signedPct(value) {
-  if (value == null) return "—";
-  const numeric = Number(value);
-  return `${numeric > 0 ? "+" : ""}${(numeric * 100).toFixed(2)}%`;
-}
-function tradeActionName(value) {
-  return ({
-    open_long: "开多", open_short: "开空", close_long: "平多", close_short: "平空",
-    add_long: "加多", reduce_long: "减多", add_short: "加空", cover_short: "减空",
-    reverse_to_long: "反手做多", reverse_to_short: "反手做空",
-  })[value] || value;
-}
+function selected() { return {symbol:$("#symbol-select").value,model:$("#model-select").value,position:$("#position-select").value,frequency:$("#frequency-select").value}; }
+function filtered(collection) { const f=selected(); return collection.filter((r) => r.symbol===f.symbol && r.model_id===f.model && r.position_type===f.position && r.frequency===f.frequency); }
 
 function render() {
-  if (!state.result) return;
-  const frequencies = ["daily", "weekly", "monthly"];
-  const summaries = frequencies.map((frequency) => state.result.summaries.find((row) => row.symbol === state.symbol && row.frequency === frequency && row.segment === state.segment));
-  $("#metric-cards").innerHTML = summaries.map((row, index) => {
-    const frequency = frequencies[index];
-    if (!row) return `<article class="metric-card ${frequency}"><header><b>${frequencyName(frequency)}</b></header><p>数据不足</p></article>`;
-    return `<article class="metric-card ${frequency}">
-      <header><b>${frequencyName(frequency)}</b><span>${row.window} ${frequency === "daily" ? "days" : frequency === "weekly" ? "weeks" : "months"}</span></header>
-      <div class="primary-metric"><strong>${pct(row.direction_accuracy)}</strong><small>方向准确率<br>${row.direction_observations} 次判断</small></div>
-      <div class="metric-list">
-        <div><span>策略累计收益</span><b>${pct(row.total_return)}</b></div>
-        <div><span>买入持有</span><b>${pct(row.buy_hold_return)}</b></div>
-        <div><span>年化收益</span><b>${pct(row.annualized_return)}</b></div>
-        <div><span>最大回撤</span><b>${pct(row.max_drawdown)}</b></div>
-        <div><span>覆盖率</span><b>${pct(row.coverage)}</b></div>
-        <div><span>平均换手</span><b>${number(row.average_turnover, 3)}</b></div>
-      </div></article>`;
-  }).join("");
-  $("#charts").innerHTML = frequencies.map((frequency) => chartCard(frequency)).join("");
-  renderPositionWorkbench();
-  const warnings = state.result.issues.filter((issue) => issue.startsWith(`${state.symbol}/`));
-  $("#warnings").hidden = warnings.length === 0;
-  $("#warnings").innerHTML = warnings.map((warning) => `<div>${escapeHtml(warning)}</div>`).join("");
+  const rows = filtered(state.result.periods); const signals = filtered(state.result.signals);
+  const summary = filtered(state.result.summaries)[0];
+  $("#metric-cards").innerHTML = summary ? [
+    ["方向准确率",pct(summary.direction_accuracy),`${summary.direction_observations} 次有方向判断`],
+    ["平均截断对数增长",num(summary.average_truncated_log_growth,6),summary.formal_sample_eligible?"达到正式样本门槛":"仅描述 未达门槛"],
+    ["累计收益",pct(summary.total_return),`买入持有 ${pct(summary.buy_hold_return)}`],
+    ["最大回撤",pct(summary.max_drawdown),`覆盖率 ${pct(summary.coverage)}`],
+  ].map((x) => `<article class="metric-card"><header><b>${x[0]}</b></header><div class="primary-metric"><strong>${x[1]}</strong><small>${x[2]}</small></div></article>`).join("") : "<p>该组合数据不足。</p>";
+  renderFrequencyOverview(); renderCharts(signals, rows); renderDiagnostics(summary, signals); renderTradeTable(); renderTable(rows);
+  const latest = signals[signals.length-1]; $("#latest-position").textContent = latest ? `${latest.evaluation_status === "pending" ? "待验证" : "最新"} ${pct(latest.position_value)}` : "";
+  const warnings = state.result.issues; $("#warnings").hidden = !warnings.length; $("#warnings").innerHTML = warnings.map((x) => `<div>${escapeHtml(x)}</div>`).join("");
 }
 
-function visiblePeriods(frequency = state.tradeFrequency) {
-  let rows = state.result.signals.filter((row) => row.symbol === state.symbol && row.frequency === frequency);
-  if (state.segment !== "all") rows = rows.filter((row) => row.segment === state.segment);
-  return rows;
+function dateLabels(rows,width,left,right,y) {
+  if (!rows.length) return ""; const indexes=[...new Set([0,Math.floor((rows.length-1)/2),rows.length-1])];
+  return indexes.map((i)=>{const x=left+i/Math.max(1,rows.length-1)*(width-left-right);const anchor=i===0?"start":i===rows.length-1?"end":"middle";return `<text x="${x}" y="${y}" text-anchor="${anchor}" class="axis-label">${escapeHtml(rows[i].signal_date)}</text>`;}).join("");
+}
+function positionChart(rows) {
+  const valid=rows.filter((r)=>r.position_value!=null); if(!valid.length)return '<div class="chart-empty">该仓位当前全部缺失</div>';
+  const w=760,h=210,l=48,r=18,t=16,b=30,x=(i)=>l+i/Math.max(1,valid.length-1)*(w-l-r),y=(v)=>t+(1-Number(v))/2*(h-t-b);
+  const path=valid.map((row,i)=>`${i?"L":"M"}${x(i).toFixed(1)},${y(row.position_value).toFixed(1)}`).join(" ");
+  return `<svg viewBox="0 0 ${w} ${h}"><rect x="${l}" y="${t}" width="${w-l-r}" height="${(h-t-b)/2}" class="long-zone"/><rect x="${l}" y="${y(0)}" width="${w-l-r}" height="${(h-t-b)/2}" class="short-zone"/><line x1="${l}" y1="${y(0)}" x2="${w-r}" y2="${y(0)}" class="zero-line"/><text x="5" y="${y(1)+4}" class="axis-label">+100%</text><text x="22" y="${y(0)+4}" class="axis-label">0%</text><text x="5" y="${y(-1)+4}" class="axis-label">−100%</text><path d="${path}" class="position-line"/>${dateLabels(valid,w,l,r,h-7)}</svg>`;
+}
+function changeChart(rows) {
+  const valid=rows.filter((r)=>r.position_change!=null); if(!valid.length)return '<div class="chart-empty">没有可比较的仓位变化</div>';
+  const w=760,h=170,l=48,r=18,t=15,b=30,m=(h-b+t)/2,cap=Math.max(.01,...valid.map((r)=>Math.abs(r.position_change))),scale=(h-t-b)/2/cap,x=(i)=>l+i/Math.max(1,valid.length-1)*(w-l-r);let up=[],down=[];
+  valid.forEach((row,i)=>{const command=`M${x(i).toFixed(1)},${m}V${(m-Number(row.position_change)*scale).toFixed(1)}`;(row.position_change>=0?up:down).push(command);});
+  return `<svg viewBox="0 0 ${w} ${h}"><line x1="${l}" y1="${m}" x2="${w-r}" y2="${m}" class="zero-line"/><path d="${up.join(" ")}" class="change-positive"/><path d="${down.join(" ")}" class="change-negative"/>${dateLabels(valid,w,l,r,h-7)}</svg>`;
+}
+function wealthChart(rows) {
+  if(!rows.length)return '<div class="chart-empty">没有净值数据</div>';const w=760,h=210,l=48,r=18,t=16,b=30;
+  const all=rows.flatMap((row)=>[row.cumulative_wealth,row.buy_hold_wealth]).filter(Number.isFinite),lo=Math.min(...all),hi=Math.max(...all),span=hi-lo||1,x=(i)=>l+i/Math.max(1,rows.length-1)*(w-l-r),y=(v)=>t+(hi-v)/span*(h-t-b);
+  const path=(field)=>rows.map((row,i)=>`${i?"L":"M"}${x(i).toFixed(1)},${y(row[field]).toFixed(1)}`).join(" ");
+  return `<svg viewBox="0 0 ${w} ${h}"><path d="${path("cumulative_wealth")}" class="line-strategy"/><path d="${path("buy_hold_wealth")}" class="line-benchmark"/>${dateLabels(rows,w,l,r,h-7)}</svg>`;
+}
+function renderCharts(signals, rows) {
+  $("#position-chart").innerHTML=positionChart(signals);$("#change-chart").innerHTML=changeChart(rows);$("#wealth-chart").innerHTML=wealthChart(rows);
+  $("#position-caption").textContent=`${signals.length} 个信号`;$("#change-caption").textContent=`${rows.filter((r)=>r.position_change!=null&&Math.abs(r.position_change)>1e-12).length} 笔变化`;
+  const last=rows[rows.length-1];$("#wealth-caption").textContent=last?`策略 ${num(last.cumulative_wealth,3)} · 持有 ${num(last.buy_hold_wealth,3)}`:"";
+}
+function renderDiagnostics(summary, signals) {
+  const uploaded=state.result?.strategy?.kind==="uploaded";
+  $("#diagnostic-title").textContent=uploaded?"上传策略诊断":"当前模型 / 经验精确 Kelly";
+  $("#diagnostic-caption").textContent=uploaded?"来自策略返回的 diagnostics，不参与仓位修正":"只作近似误差诊断，不改变正式判定";
+  const latest=signals[signals.length-1];
+  const items=uploaded
+    ? Object.entries(latest?.diagnostics||{}).map(([key,value])=>[key,escapeHtml(value)])
+    : summary?[["平均绝对仓位",pct(summary.average_abs_position)],["相对经验精确平均仓位差",pct(summary.mean_abs_exact_position_gap)],["经验精确目标平均损失",num(summary.mean_exact_empirical_objective_loss,7)],["与经验精确方向一致率",pct(summary.exact_direction_agreement)],["触及 ±100% 边界",pct(summary.boundary_rate)],["财富可行率",pct(summary.wealth_feasibility_rate)]]:[];
+  $("#strategy-diagnostics").innerHTML=items.map(([label,value])=>`<div><span>${label}</span><strong>${value}</strong></div>`).join("");
+}
+function renderFrequencyOverview(){const f=selected(),names={daily:"日频",weekly:"周频",monthly:"月频"},rows=state.result.summaries.filter((r)=>r.symbol===f.symbol&&r.model_id===f.model&&r.position_type===f.position);$("#frequency-overview-grid").innerHTML=["daily","weekly","monthly"].map((frequency)=>{const row=rows.find((r)=>r.frequency===frequency);return `<article><b>${names[frequency]}</b>${row?`<span>准确 ${pct(row.direction_accuracy)}</span><span>收益 ${pct(row.total_return)}</span><span>回撤 ${pct(row.max_drawdown)}</span>`:"<span>数据不足</span>"}</article>`;}).join("");}
+function tradeActionName(value){return ({open_long:"开多",open_short:"开空",close_long:"平多",close_short:"平空",add_long:"加多",reduce_long:"减多",add_short:"加空",cover_short:"减空",reverse_to_long:"反手做多",reverse_to_short:"反手做空"})[value]||value;}
+function renderTradeTable(){
+  if(!state.result)return;const rows=filtered(state.result.trades).slice().reverse(),pages=Math.max(1,Math.ceil(rows.length/state.tradePageSize));state.tradePage=Math.max(0,Math.min(state.tradePage,pages-1));const page=rows.slice(state.tradePage*state.tradePageSize,(state.tradePage+1)*state.tradePageSize);
+  $("#trade-count").textContent=`${rows.length.toLocaleString("zh-CN")} 笔`;$("#trade-page").textContent=rows.length?`第 ${state.tradePage+1} / ${pages} 页`:"无调仓";$("#trade-prev").disabled=state.tradePage===0;$("#trade-next").disabled=state.tradePage>=pages-1;
+  $("#trade-table-body").innerHTML=page.map((r)=>{const cls=r.position_change>0?"increase":"decrease",pending=r.evaluation_status==="pending";return `<tr><td>${escapeHtml(r.signal_date)}</td><td><span class="action-tag ${cls}">${tradeActionName(r.action)}</span></td><td>${pct(r.previous_position)}</td><td>${pct(r.target_position)}</td><td class="${cls}">${pct(r.position_change)}</td><td><span class="evaluation-tag ${pending?"pending":"evaluated"}">${pending?"待验证":"已评价"}</span></td><td>${r.return_date||"—"}</td><td>${num(r.wealth_multiplier,6)}</td><td>${num(r.cumulative_wealth,4)}</td></tr>`;}).join("")||'<tr><td colspan="9" class="table-empty">当前筛选条件下没有非零仓位变化</td></tr>';
+}
+function renderTable(rows) {
+  const page=rows.slice(-100).reverse();
+  $("#period-table-body").innerHTML = page.map((r)=>`<tr><td>${escapeHtml(r.signal_date)}</td><td>${r.bankrupt?"破产":r.wealth_feasible===true?"可行":"缺失"}</td><td>${pct(r.position_value)}</td><td>${pct(r.position_change)}</td><td>${pct(r.next_return)}</td><td>${num(r.truncated_log_growth,6)}</td><td>${r.direction_success==null?"—":r.direction_success?"成功":"未成功"}</td></tr>`).join("") || '<tr><td colspan="7" class="table-empty">没有逐期结果</td></tr>';
 }
 
-function dateLabels(rows, width, left, right, y) {
-  if (!rows.length) return "";
-  const indices = [...new Set([0, Math.floor((rows.length - 1) / 2), rows.length - 1])];
-  const span = width - left - right;
-  return indices.map((index) => {
-    const x = left + (index / Math.max(1, rows.length - 1)) * span;
-    const anchor = index === 0 ? "start" : index === rows.length - 1 ? "end" : "middle";
-    return `<text x="${x.toFixed(1)}" y="${y}" text-anchor="${anchor}" class="axis-label">${escapeHtml(rows[index].signal_date)}</text>`;
-  }).join("");
-}
-
-function renderPositionChart(rows) {
-  if (!rows.length) return '<div class="chart-empty">当前区间没有仓位记录</div>';
-  const width = 760, height = 228, left = 48, right = 18, top = 18, bottom = 34;
-  const plotWidth = width - left - right, plotHeight = height - top - bottom;
-  const x = (index) => left + index / Math.max(1, rows.length - 1) * plotWidth;
-  const y = (value) => top + (1 - (Number(value) + 1) / 2) * plotHeight;
-  const path = rows.map((row, index) => `${index ? "L" : "M"}${x(index).toFixed(2)},${y(row.position).toFixed(2)}`).join(" ");
-  const last = rows[rows.length - 1];
-  return `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="目标仓位随时间变化，零线上方为做多，下方为做空">
-    <defs><linearGradient id="position-gradient" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#2858cc"/><stop offset="49.5%" stop-color="#2858cc"/><stop offset="50.5%" stop-color="#d26a31"/><stop offset="100%" stop-color="#d26a31"/></linearGradient></defs>
-    <rect x="${left}" y="${top}" width="${plotWidth}" height="${plotHeight / 2}" class="long-zone"/>
-    <rect x="${left}" y="${top + plotHeight / 2}" width="${plotWidth}" height="${plotHeight / 2}" class="short-zone"/>
-    <line x1="${left}" y1="${y(1)}" x2="${width - right}" y2="${y(1)}" class="tape-grid"/>
-    <line x1="${left}" y1="${y(0)}" x2="${width - right}" y2="${y(0)}" class="zero-line"/>
-    <line x1="${left}" y1="${y(-1)}" x2="${width - right}" y2="${y(-1)}" class="tape-grid"/>
-    <text x="8" y="${y(1) + 4}" class="axis-label">+100%</text><text x="21" y="${y(0) + 4}" class="axis-label">0%</text><text x="8" y="${y(-1) + 4}" class="axis-label">−100%</text>
-    <path d="${path}" class="position-line"/>
-    <circle cx="${x(rows.length - 1)}" cy="${y(last.position)}" r="3.5" class="position-end"/>
-    ${dateLabels(rows, width, left, right, height - 8)}
-  </svg>`;
-}
-
-function renderChangeChart(rows) {
-  if (!rows.length) return '<div class="chart-empty">当前区间没有调仓变化</div>';
-  const width = 760, height = 170, left = 48, right = 18, top = 15, bottom = 34;
-  const plotWidth = width - left - right, middle = top + (height - top - bottom) / 2;
-  const maxChange = Math.max(0.01, ...rows.map((row) => Math.abs(Number(row.position_change))));
-  const scale = (height - top - bottom) / 2 / maxChange;
-  const x = (index) => left + index / Math.max(1, rows.length - 1) * plotWidth;
-  const positive = [], negative = [];
-  rows.forEach((row, index) => {
-    const target = middle - Number(row.position_change) * scale;
-    const command = `M${x(index).toFixed(2)},${middle.toFixed(2)}V${target.toFixed(2)}`;
-    (row.position_change >= 0 ? positive : negative).push(command);
-  });
-  return `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="每次目标仓位变化，向上表示仓位数值增加，向下表示仓位数值减少">
-    <line x1="${left}" y1="${top}" x2="${width - right}" y2="${top}" class="tape-grid"/>
-    <line x1="${left}" y1="${middle}" x2="${width - right}" y2="${middle}" class="zero-line"/>
-    <line x1="${left}" y1="${height - bottom}" x2="${width - right}" y2="${height - bottom}" class="tape-grid"/>
-    <text x="4" y="${top + 4}" class="axis-label">${signedPct(maxChange)}</text><text x="21" y="${middle + 4}" class="axis-label">0%</text><text x="4" y="${height - bottom + 4}" class="axis-label">${signedPct(-maxChange)}</text>
-    <path d="${positive.join(" ")}" class="change-positive"/><path d="${negative.join(" ")}" class="change-negative"/>
-    ${dateLabels(rows, width, left, right, height - 8)}
-  </svg>`;
-}
-
-function visibleTrades() {
-  let rows = state.result.trades.filter((row) => row.symbol === state.symbol && row.frequency === state.tradeFrequency);
-  if (state.segment !== "all") rows = rows.filter((row) => row.segment === state.segment);
-  return rows.slice().reverse();
-}
-
-function renderTradeTable() {
-  const rows = visibleTrades();
-  const pages = Math.max(1, Math.ceil(rows.length / state.tradePageSize));
-  state.tradePage = Math.max(0, Math.min(state.tradePage, pages - 1));
-  const start = state.tradePage * state.tradePageSize;
-  const pageRows = rows.slice(start, start + state.tradePageSize);
-  $("#trade-count").textContent = `${rows.length.toLocaleString("zh-CN")} 笔`;
-  $("#trade-page").textContent = rows.length ? `第 ${state.tradePage + 1} / ${pages} 页` : "无调仓记录";
-  $("#trade-prev").disabled = state.tradePage === 0;
-  $("#trade-next").disabled = state.tradePage >= pages - 1;
-  $("#trade-table-body").innerHTML = pageRows.length ? pageRows.map((row) => {
-    const directionClass = row.position_change > 0 ? "increase" : "decrease";
-    const pending = row.evaluation_status === "pending";
-    return `<tr><td>${escapeHtml(row.signal_date)}</td><td><span class="action-tag ${directionClass}">${escapeHtml(tradeActionName(row.action))}</span></td>
-      <td>${pct(row.previous_position)}</td><td>${pct(row.target_position)}</td><td class="${directionClass}">${signedPct(row.position_change)}</td>
-      <td>${pct(row.cost_rate)}</td><td><span class="evaluation-tag ${pending ? "pending" : "evaluated"}">${pending ? "待验证" : "已评价"}</span></td>
-      <td>${pending ? "—" : escapeHtml(row.return_date)}</td><td class="${pending ? "" : row.net_return >= 0 ? "increase" : "decrease"}">${pending ? "—" : signedPct(row.net_return)}</td></tr>`;
-  }).join("") : '<tr><td colspan="9" class="table-empty">当前区间没有非零仓位变化</td></tr>';
-}
-
-function renderDiagnostics() {
-  const summary = state.result.summaries.find((row) => row.symbol === state.symbol && row.frequency === state.tradeFrequency && row.segment === state.segment);
-  const items = summary ? [
-    ["单期平均对数增长", bps(summary.average_log_growth)],
-    ["对数增长年化", pct(summary.annualized_log_growth)],
-    ["触及仓位边界比例", pct(summary.boundary_rate)],
-  ] : [];
-  if (summary && summary.mean_abs_exact_kelly_gap != null) {
-    items.push(["与经验精确仓位平均差", pct(summary.mean_abs_exact_kelly_gap)]);
-    items.push(["与经验精确方向一致率", pct(summary.exact_direction_agreement)]);
-  } else if (summary) {
-    const latest = visiblePeriods().at(-1);
-    Object.entries(latest?.diagnostics || {}).slice(0, 2).forEach(([key, value]) => {
-      items.push([key, typeof value === "number" ? number(value, 4) : String(value)]);
-    });
-  }
-  $("#diagnostic-title").textContent = `${state.result.strategy.name} · 策略诊断`;
-  $("#diagnostic-note").textContent = state.result.strategy.kind === "uploaded"
-    ? "上传策略的自定义诊断与统一绩效"
-    : "经验精确解用于比较同一窗口的目标差异";
-  $("#strategy-diagnostics").innerHTML = items.length
-    ? items.map(([label, value]) => `<div><span>${label}</span><strong>${value}</strong></div>`).join("")
-    : '<p class="diagnostic-empty">当前频率与区间没有可评价诊断数据。</p>';
-}
-
-function renderPositionWorkbench() {
-  if (!state.result) return;
-  const rows = visiblePeriods();
-  const trades = visibleTrades();
-  $("#position-chart").innerHTML = renderPositionChart(rows);
-  $("#change-chart").innerHTML = renderChangeChart(rows);
-  const latest = rows[rows.length - 1];
-  $("#position-caption").textContent = latest
-    ? `最新 ${pct(latest.position)} · ${latest.signal_date}${latest.evaluation_status === "pending" ? " · 待验证" : ""}`
-    : "无记录";
-  const maxChange = rows.length ? Math.max(...rows.map((row) => Math.abs(row.position_change))) : 0;
-  $("#change-caption").textContent = `${trades.length.toLocaleString("zh-CN")} 笔 · 最大变动 ${pct(maxChange)}`;
-  renderDiagnostics();
-  renderTradeTable();
-}
-
-function chartCard(frequency) {
-  let rows = state.result.periods.filter((row) => row.symbol === state.symbol && row.frequency === frequency);
-  if (state.segment !== "all") rows = rows.filter((row) => row.segment === state.segment);
-  if (!rows.length) return `<article class="chart-card"><header><b>${frequencyName(frequency)}</b><span>无数据</span></header></article>`;
-  let strategy = 1, benchmark = 1;
-  const strategyValues = [1], benchmarkValues = [1];
-  rows.forEach((row) => {
-    strategy *= 1 + row.net_return; benchmark *= 1 + row.next_return;
-    strategyValues.push(strategy); benchmarkValues.push(benchmark);
-  });
-  const all = strategyValues.concat(benchmarkValues);
-  const low = Math.min(...all), high = Math.max(...all), span = high - low || 1;
-  const points = (values) => values.map((value, index) => `${(index / (values.length - 1) * 300).toFixed(1)},${(140 - (value - low) / span * 140).toFixed(1)}`).join(" ");
-  return `<article class="chart-card"><header><b>${frequencyName(frequency)}净值</b><span>${rows.length} 期</span></header>
-    <svg viewBox="0 0 300 140" role="img" aria-label="${frequencyName(frequency)}策略与买入持有净值">
-      <line x1="0" y1="35" x2="300" y2="35" class="chart-grid"/><line x1="0" y1="70" x2="300" y2="70" class="chart-grid"/><line x1="0" y1="105" x2="300" y2="105" class="chart-grid"/>
-      <polyline points="${points(benchmarkValues)}" class="line-benchmark"/><polyline points="${points(strategyValues)}" class="line-strategy"/>
-    </svg><div class="chart-legend"><span class="strategy-key"><i></i>策略 ${pct(strategy - 1)}</span><span class="benchmark-key"><i></i>买入持有 ${pct(benchmark - 1)}</span></div></article>`;
-}
-
-function csvValue(value) {
-  const text = value == null ? "" : String(value);
-  return /[",\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
-}
 function downloadCsv(rows, filename) {
-  if (!rows.length) return;
-  const columns = Object.keys(rows[0]);
-  const csv = [columns.join(","), ...rows.map((row) => columns.map((column) => csvValue(row[column])).join(","))].join("\n");
-  const link = document.createElement("a");
-  link.href = URL.createObjectURL(new Blob(["\ufeff", csv], { type: "text/csv;charset=utf-8" }));
-  link.download = filename; link.click(); URL.revokeObjectURL(link.href);
+  if (!rows || !rows.length) return; const keys=Object.keys(rows[0]); const quote=(v)=>`"${String(v??"").replaceAll('"','""')}"`;
+  const text="\ufeff"+[keys.join(","),...rows.map((r)=>keys.map((k)=>quote(r[k])).join(","))].join("\n");
+  const link=document.createElement("a"); link.href=URL.createObjectURL(new Blob([text],{type:"text/csv"})); link.download=filename; link.click(); URL.revokeObjectURL(link.href);
 }
-function outputName(suffix) { return `${state.result.strategy.id}_${suffix}.csv`; }
-$("#download-summary").addEventListener("click", () => downloadCsv(state.result.summaries, outputName("summary")));
-$("#download-signals").addEventListener("click", () => downloadCsv(state.result.signals, outputName("signals")));
-$("#download-periods").addEventListener("click", () => downloadCsv(state.result.periods, outputName("periods")));
-$("#download-trades").addEventListener("click", () => downloadCsv(state.result.trades, outputName("trades")));
+$("#download-summary").addEventListener("click",()=>downloadCsv(state.result?.summaries,"kelly_summary.csv"));
+$("#download-statistics").addEventListener("click",()=>downloadCsv(state.result?.statistics,"kelly_statistics.csv"));
+$("#download-signals").addEventListener("click",()=>downloadCsv(state.result?.signals,"kelly_signals.csv"));
+$("#download-periods").addEventListener("click",()=>downloadCsv(state.result?.periods,"kelly_periods.csv"));
+$("#download-trades").addEventListener("click",()=>downloadCsv(state.result?.trades,"kelly_trades.csv"));

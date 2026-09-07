@@ -52,8 +52,8 @@ class StrategyDefinition:
     version: str
     description: str
     kind: str
-    uses_kelly_fraction: bool
-    decide: DecisionFunction
+    supports_kappa: bool
+    decide: DecisionFunction | None
 
     def public_dict(self) -> dict[str, object]:
         return {
@@ -62,5 +62,5 @@ class StrategyDefinition:
             "version": self.version,
             "description": self.description,
             "kind": self.kind,
-            "uses_kelly_fraction": self.uses_kelly_fraction,
+            "supports_kappa": self.supports_kappa,
         }

@@ -97,6 +97,6 @@ def load_user_strategy(source: str, filename: str = "uploaded_strategy.py") -> S
         version=str(version),
         description=str(description),
         kind="uploaded",
-        uses_kelly_fraction=False,
+        supports_kappa=False,
         decide=decide,
     )

@@ -1,7 +1,7 @@
 """Strategy registry and upload contract."""
 
 from .contract import StrategyContext, StrategyDecision, StrategyDefinition
-from .kelly import BUILTIN_STRATEGIES, BUILTIN_STRATEGY_IDS
+from .kelly import BUILTIN_STRATEGIES, BUILTIN_STRATEGY_IDS, KELLY_STRATEGY_ID
 from .loader import load_user_strategy
 
 
@@ -19,6 +19,7 @@ def strategy_catalog() -> list[dict[str, object]]:
 __all__ = [
     "BUILTIN_STRATEGIES",
     "BUILTIN_STRATEGY_IDS",
+    "KELLY_STRATEGY_ID",
     "StrategyContext",
     "StrategyDecision",
     "StrategyDefinition",
