@@ -3,182 +3,119 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>K/60 · 滚动 Kelly 研究台</title>
+  <title>Kelly 六模型研究台</title>
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
   <header class="masthead">
-    <a class="brand" href="#top" aria-label="返回顶部"><span>K</span><i>/</i><strong>60</strong></a>
-    <div class="mast-copy">
-      <p class="eyebrow">滚动四阶矩 · 本地研究工具</p>
-      <h1>让一次仓位判断，<br>有来路，也有结果。</h1>
-    </div>
-    <div class="privacy"><span></span>策略计算留在本机</div>
+    <a class="brand" href="#top" aria-label="返回顶部"><span>K</span><i>/</i><strong>6</strong></a>
+    <div class="mast-copy"><p class="eyebrow">六模型 · 三类仓位 · 下一期验证</p><h1>先固定规则，<br>再让结果说话。</h1></div>
+    <div class="privacy"><span></span>计算留在本机</div>
   </header>
 
   <main id="top" class="workspace">
     <aside class="control-panel" aria-labelledby="control-title">
-      <div class="panel-heading">
-        <p>运行设置</p>
-        <span>3个频率 · 各60期</span>
-      </div>
-      <h2 id="control-title">取得日线价格</h2>
+      <div class="panel-heading"><p>运行设置</p><span>日 252 · 周 104 · 月 60</span></div>
+      <h2 id="control-title">加载复权价格</h2>
       <div class="source-tabs" role="tablist" aria-label="行情来源">
-        <button id="csv-tab" class="active" data-source="csv" type="button">上传 CSV</button>
-        <button id="eodhd-tab" data-source="eodhd" type="button">EODHD 取数</button>
+        <button class="active" data-source="csv" type="button">上传 CSV / Excel</button>
+        <button data-source="eodhd" type="button">EODHD 三频</button>
       </div>
-
       <section id="csv-source" class="source-panel">
         <label class="drop-zone" id="drop-zone" for="file-input">
-          <input id="file-input" type="file" accept=".csv,text/csv">
-          <span class="drop-mark">CSV</span>
-          <strong id="file-label">选择或拖入文件</strong>
-          <small>date, symbol, adjusted_close</small>
+          <input id="file-input" type="file" accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
+          <span class="drop-mark">DATA</span><strong id="file-label">选择或拖入文件</strong>
+          <small>正式运行可用 daily / weekly / monthly 三工作表 Excel；日频 CSV 是本地聚合兼容入口。</small>
         </label>
-        <button class="text-button" id="demo-button" type="button">没有数据？载入合成演示</button>
+        <button class="text-button" id="demo-button" type="button">载入合成演示</button>
       </section>
-
       <section id="eodhd-source" class="source-panel api-source" hidden>
-        <label>
-          <span>EODHD 代码</span>
-          <input id="eodhd-symbol" type="text" value="300308.SHE" maxlength="64" autocomplete="off">
-          <small>例如 300308.SHE、AAPL.US</small>
-        </label>
+        <label><span>EODHD 代码</span><input id="eodhd-symbol" value="300308.SHE" maxlength="64"><small>例如 300308.SHE、AAPL.US</small></label>
         <div class="api-date-grid">
-          <label><span>开始日期</span><input id="eodhd-from" type="date" value="2012-01-01"></label>
+          <label><span>开始日期</span><input id="eodhd-from" type="date" value="2002-01-01"></label>
           <label><span>结束日期</span><input id="eodhd-to" type="date"><small>留空表示今天</small></label>
         </div>
-        <button class="fetch-button" id="eodhd-fetch" type="button">拉取真实日线</button>
+        <button class="fetch-button" id="eodhd-fetch" type="button">拉取日 周 月真实行情</button>
         <p id="eodhd-config-status" class="api-note">正在检查服务端 Token…</p>
       </section>
 
-      <div class="field-grid">
-        <label>
-          <span>Kelly 比例</span>
-          <input id="fraction" type="number" min="0.05" max="1" step="0.05" value="0.5">
-          <small>0.5 即 Half Kelly</small>
-        </label>
-        <label>
-          <span>单边成本（bps）</span>
-          <input id="cost" type="number" min="0" max="1000" step="1" value="10">
-          <small>10 bps = 0.10%</small>
-        </label>
-      </div>
-
-      <div class="fixed-rule">
-        <span>固定边界</span><strong>−100% → +100%</strong>
-      </div>
-      <button class="run-button" id="run-button" type="button" disabled>
-        <span>开始计算</span><b>→</b>
-      </button>
-      <p class="status" id="status" role="status">先上传 CSV，或从 EODHD 拉取日频复权价格。</p>
+      <section class="kappa-control" aria-labelledby="kappa-title">
+        <div><span id="kappa-title">收敛安全比例 κ</span><strong id="kappa-value">0.80</strong></div>
+        <input id="kappa" type="range" min="0.10" max="0.99" step="0.01" value="0.80">
+        <div class="kappa-presets">
+          <button type="button" data-kappa="0.50">严格 0.50</button>
+          <button type="button" data-kappa="0.80" class="active">基准 0.80</button>
+          <button type="button" data-kappa="0.95">宽松 0.95</button>
+        </div>
+        <small>按钮只改变预先声明的数学安全域；系统不会寻找历史收益最高的 κ。</small>
+      </section>
+      <div class="fixed-rule"><span>三类仓位</span><strong>RAW · BOUNDED · SAFE</strong></div>
+      <button class="run-button" id="run-button" type="button" disabled><span>按当前 κ 计算</span><b>→</b></button>
+      <p class="status" id="status" role="status">先加载行情，再运行六模型验证。</p>
     </aside>
 
     <section class="main-stage">
-      <section class="logic-strip" aria-labelledby="logic-title">
-        <div class="logic-heading">
-          <p>每一次判断</p>
-          <h2 id="logic-title">只看身后的 60 期，再走向下一期</h2>
-        </div>
-        <div class="frequency-lanes" aria-hidden="true">
-          <div class="lane daily"><b>日</b><div class="ticks"></div><span>f</span><i>次日</i></div>
-          <div class="lane weekly"><b>周</b><div class="ticks"></div><span>f</span><i>次周</i></div>
-          <div class="lane monthly"><b>月</b><div class="ticks"></div><span>f</span><i>次月</i></div>
-        </div>
-        <p class="logic-caption">60 个收益估计四个矩 → 求仓位 f → 用下一期真实收益验算</p>
+      <section class="logic-strip">
+        <div class="logic-heading"><p>研究契约</p><h2>六个目标函数，三种独立求解</h2></div>
+        <p class="logic-caption">RAW 看模型原始倾向 · BOUNDED 限制敞口 · SAFE 再限制 Taylor 收敛域</p>
       </section>
-
       <section id="empty-state" class="empty-state">
-        <div class="empty-orbit"><span>q₁</span><span>q₂</span><span>q₃</span><span>q₄</span><b>f</b></div>
-        <h2>结果会在这里展开</h2>
-        <p>先从左侧放入价格文件。程序会为每个标的分别计算日、周、月三套结果。</p>
+        <div class="empty-orbit"><span>M2</span><span>M3</span><span>M4</span><span>EX</span><b>f</b></div>
+        <h2>结果会在这里展开</h2><p>加载行情后，选择模型、仓位类型和频率查看真实逐期计算。</p>
       </section>
-
       <section id="results" class="results" hidden>
-        <div class="result-toolbar">
-          <label>查看标的 <select id="symbol-select"></select></label>
-          <div class="segment-tabs" role="tablist" aria-label="评价区间">
-            <button data-segment="development" type="button">开发段 70%</button>
-            <button data-segment="holdout" type="button">保留段 30%</button>
-            <button data-segment="all" class="active" type="button">全区间</button>
-          </div>
+        <div class="result-toolbar filter-grid">
+          <label>标的<select id="symbol-select"></select></label>
+          <label>模型<select id="model-select"></select></label>
+          <label>仓位<select id="position-select"><option>SAFE</option><option>BOUNDED</option><option>RAW</option></select></label>
+          <label>频率<select id="frequency-select"><option value="daily">日频</option><option value="weekly">周频</option><option value="monthly">月频</option></select></label>
         </div>
         <div id="metric-cards" class="metric-cards"></div>
-        <div id="charts" class="charts"></div>
-
-        <section class="position-workbench" aria-labelledby="position-title">
-          <header class="workbench-heading">
-            <div>
-              <p>POSITION TAPE</p>
-              <h2 id="position-title">仓位与调仓轨迹</h2>
-            </div>
-            <div class="frequency-tabs" id="trade-frequency-tabs" role="tablist" aria-label="仓位频率">
-              <button class="active" data-frequency="daily" type="button">日频</button>
-              <button data-frequency="weekly" type="button">周频</button>
-              <button data-frequency="monthly" type="button">月频</button>
-            </div>
-          </header>
-
-          <section class="diagnostic-band" aria-label="Kelly目标与近似误差诊断">
-            <header><b>M4 与经验精确 Kelly 诊断</b><span>精确解仅作对照，不改变实际交易仓位</span></header>
+        <section class="frequency-overview"><header><b>三频对照</b><span>同一模型与仓位类型</span></header><div id="frequency-overview-grid"></div></section>
+        <section class="position-workbench">
+          <header class="workbench-heading"><div><p>POSITION AUDIT</p><h2>仓位与下一期结果</h2></div><strong id="latest-position"></strong></header>
+          <section class="diagnostic-band" aria-label="模型与经验精确 Kelly 诊断">
+            <header><b>当前模型 / 经验精确 Kelly</b><span>只作近似误差诊断，不改变正式判定</span></header>
             <div id="strategy-diagnostics" class="diagnostic-grid"></div>
           </section>
-
           <div class="position-panels">
-            <article class="tape-card">
-              <header><b>目标仓位曲线</b><span id="position-caption"></span></header>
-              <div id="position-chart" class="wide-chart"></div>
-              <div class="tape-legend"><span class="long-key"><i></i>做多仓位</span><span class="short-key"><i></i>做空仓位</span><span class="zero-key"><i></i>零仓位</span></div>
-            </article>
-            <article class="tape-card">
-              <header><b>单次调仓变化</b><span id="change-caption"></span></header>
-              <div id="change-chart" class="wide-chart change-chart"></div>
-              <div class="tape-legend"><span class="increase-key"><i></i>仓位向多方向变动</span><span class="decrease-key"><i></i>仓位向空方向变动</span></div>
-            </article>
+            <article class="tape-card"><header><b>策略净值 / 买入持有</b><span id="wealth-caption"></span></header><div id="wealth-chart" class="wide-chart"></div><div class="tape-legend"><span class="long-key"><i></i>策略净值</span><span class="short-key"><i></i>买入持有</span></div></article>
+            <article class="tape-card"><header><b>目标仓位曲线</b><span id="position-caption"></span></header><div id="position-chart" class="wide-chart"></div><div class="tape-legend"><span class="long-key"><i></i>做多</span><span class="short-key"><i></i>做空</span><span class="zero-key"><i></i>零仓位</span></div></article>
+            <article class="tape-card"><header><b>单次仓位变化</b><span id="change-caption"></span></header><div id="change-chart" class="wide-chart change-chart"></div><div class="tape-legend"><span class="increase-key"><i></i>向多方向</span><span class="decrease-key"><i></i>向空方向</span></div></article>
           </div>
-
-          <section class="trade-ledger" aria-labelledby="trade-ledger-title">
-            <header>
-              <div><h3 id="trade-ledger-title">模拟逐笔调仓</h3><p>相邻目标仓位发生变化即记一笔；不代表券商真实成交。</p></div>
-              <strong id="trade-count"></strong>
-            </header>
-            <div class="table-scroll">
-              <table>
-                <thead><tr><th>信号日</th><th>操作</th><th>原仓位</th><th>目标仓位</th><th>变动</th><th>成本</th><th>状态</th><th>下一期</th><th>净收益</th></tr></thead>
-                <tbody id="trade-table-body"></tbody>
-              </table>
-            </div>
-            <footer class="table-pager">
-              <button id="trade-prev" type="button">← 上一页</button>
-              <span id="trade-page"></span>
-              <button id="trade-next" type="button">下一页 →</button>
-            </footer>
+          <section class="trade-ledger">
+            <header><div><h3>模拟逐笔买卖操作</h3><p>相邻目标仓位变化记一笔；RAW 是研究信号，不代表可执行委托。</p></div><strong id="trade-count"></strong></header>
+            <div class="table-scroll"><table><thead><tr><th>信号日</th><th>操作</th><th>原仓位</th><th>目标仓位</th><th>变动</th><th>状态</th><th>下一期</th><th>财富倍数</th><th>累计净值</th></tr></thead><tbody id="trade-table-body"></tbody></table></div>
+            <div class="table-pager"><button id="trade-prev" type="button">上一页</button><span id="trade-page"></span><button id="trade-next" type="button">下一页</button></div>
           </section>
+          <details class="period-audit">
+            <summary>查看最近100条逐期计算审计</summary>
+            <div class="table-scroll"><table><thead><tr><th>信号日</th><th>状态</th><th>仓位</th><th>变动</th><th>下一期收益</th><th>截断对数增长</th><th>方向</th></tr></thead><tbody id="period-table-body"></tbody></table></div>
+          </details>
         </section>
-
         <div class="download-row">
           <button id="download-summary" type="button">下载摘要 CSV</button>
-          <button id="download-signals" type="button">下载仓位信号 CSV</button>
-          <button id="download-periods" type="button">下载逐期明细 CSV</button>
+          <button id="download-statistics" type="button">下载统计结论 CSV</button>
+          <button id="download-signals" type="button">下载信号 CSV</button>
+          <button id="download-periods" type="button">下载逐期 CSV</button>
           <button id="download-trades" type="button">下载调仓流水 CSV</button>
         </div>
         <div id="warnings" class="warnings" hidden></div>
       </section>
-
       <details class="method-card">
-        <summary><span>计算逻辑</span><b>展开公式与口径</b></summary>
+        <summary><span>计算逻辑</span><b>新研究口径</b></summary>
         <div class="method-grid">
-          <article><em>1</em><h3>生成三种频率</h3><p>日线直接使用；周线和月线取每个完整周期最后一条复权价格。不能确认完整的最后一周或最后一月会被舍弃。</p></article>
-          <article><em>2</em><h3>计算收益</h3><code>Rₜ = Pₜ / Pₜ₋₁ − 1</code><p>日、周、月各自独立计算，不跨频率拼接。</p></article>
-          <article><em>3</em><h3>滚动四阶矩</h3><code>qₖ = (1/60) Σ Rᵢᵏ，k=1…4</code><p>假设下一期收益的前四阶矩与最近 60 期相同。这是估计假设，不是已知事实。</p></article>
-          <article><em>4</em><h3>求解并检查近似</h3><code>G₄(f)=q₁f−q₂f²/2+q₃f³/3−q₄f⁴/4</code><p>实际仓位仍由 M4 求解；同时计算经验精确 Kelly，只用来量化 Taylor 截断误差。</p></article>
-          <article><em>5</em><h3>降低并记录仓位</h3><code>Δf = 本期目标仓位 − 上期目标仓位</code><p>实际仓位是 Kelly 比例乘以 Full Kelly；每次非零 Δf 形成一条模拟调仓记录。</p></article>
-          <article><em>6</em><h3>用下一期验算</h3><code>log增长 = log(M)，M &gt; 0</code><p>方向准确率只统计有方向的时期；若财富归零，单期对数增长显示为空而非伪造有限值。最新一期没有未来收益时保留为“待验证”。</p></article>
+          <article><em>1</em><h3>直接使用分频数据</h3><p>EODHD 分别请求日、周、月；Excel 分别读取 daily、weekly、monthly 工作表。</p></article>
+          <article><em>2</em><h3>滚动窗口</h3><p>日 252、周 104、月 60 个完整有效收益，只使用信号日已经可获得的数据。</p></article>
+          <article><em>3</em><h3>六模型</h3><p>M2_LOG 是基准；另外五个模型作为正式候选，同时与 M2 和买入持有比较。</p></article>
+          <article><em>4</em><h3>三类仓位</h3><p>RAW、BOUNDED、SAFE 分别重新求解，互不回退，也不做 Half Kelly 缩放。</p></article>
+          <article><em>5</em><h3>κ 的作用</h3><p>κ 越小，Taylor 收敛安全域通常越严格。它不是根据回测收益自动选择的参数。</p></article>
+          <article><em>6</em><h3>正式证据</h3><p>使用循环移动区块 Bootstrap 和固定 18 组的 BH-FDR；方向准确率只作描述。</p></article>
         </div>
       </details>
     </section>
   </main>
-  <footer>研究结果不构成投资建议 · 未计入滑点、融资与融券限制</footer>
+  <footer>研究结果不构成投资建议 · 当前不计交易成本</footer>
   <script src="/app.js"></script>
 </body>
 </html>

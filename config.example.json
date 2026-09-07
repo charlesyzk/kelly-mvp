@@ -1,12 +1,26 @@
 {
   "windows": {
-    "daily": 60,
-    "weekly": 60,
+    "daily": 252,
+    "weekly": 104,
     "monthly": 60
   },
-  "kelly_fraction": 0.5,
+  "minimum_matches": {
+    "daily": 252,
+    "weekly": 52,
+    "monthly": 24
+  },
   "lower_bound": -1.0,
   "upper_bound": 1.0,
-  "transaction_cost_bps": 0.0,
-  "development_fraction": 0.7
+  "convergence_kappa": 0.8,
+  "wealth_floor": 1e-12,
+  "bootstrap_repetitions": 2000,
+  "bootstrap_seed": 20260904,
+  "bootstrap_blocks": {
+    "daily": 20,
+    "weekly": 8,
+    "monthly": 6
+  },
+  "formal_fdr": 0.05,
+  "exploratory_fdr": 0.1,
+  "transaction_cost_bps": 0.0
 }

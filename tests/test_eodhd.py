@@ -18,6 +18,11 @@ class EODHDTests(unittest.TestCase):
         self.assertEqual(query["from"], ["2024-01-02"])
         self.assertEqual(query["to"], ["2024-01-05"])
 
+    def test_url_supports_provider_weekly_and_monthly_periods(self):
+        for frequency, expected in (("weekly", "w"), ("monthly", "m")):
+            url = build_eodhd_url("X.US", "2024-01-02", "2024-01-05", "token", frequency)
+            self.assertEqual(parse_qs(urlparse(url).query)["period"], [expected])
+
     def test_fetch_normalizes_real_response_shape(self):
         payload = [
             {"date": "2024-01-03", "adjusted_close": 10.5, "volume": 123},

@@ -1,4 +1,4 @@
-"""Strict CSV ingestion and conservative daily/weekly/monthly aggregation."""
+"""Strict CSV/Excel ingestion plus an explicitly labelled daily-data fallback."""
 
 from __future__ import annotations
 
@@ -6,10 +6,16 @@ import calendar
 import csv
 import io
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from math import isfinite
 from pathlib import Path
 from typing import Iterable
+from zipfile import BadZipFile
+
+from openpyxl import load_workbook
+from openpyxl.utils.exceptions import InvalidFileException
+
+from .config import FREQUENCIES
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,6 +65,73 @@ def load_daily_prices(path: str | Path) -> list[PriceRow]:
     if not source.is_file():
         raise FileNotFoundError(f"input CSV does not exist: {source}")
     return parse_daily_prices(source.read_text(encoding="utf-8-sig"))
+
+
+def parse_price_workbook(content: bytes) -> dict[str, list[PriceRow]]:
+    """Load provider-supplied daily/weekly/monthly sheets from XLSX.
+
+    Each present sheet must be named daily, weekly or monthly and contain
+    date, symbol and adjusted_close columns. Frequencies are never inferred
+    from filenames or silently manufactured inside this loader.
+    """
+
+    if not isinstance(content, bytes) or not content:
+        raise ValueError("input workbook is empty")
+    try:
+        workbook = load_workbook(io.BytesIO(content), read_only=True, data_only=True)
+    except (BadZipFile, InvalidFileException, OSError) as exc:
+        raise ValueError("input workbook is not a valid XLSX file") from exc
+    output: dict[str, list[PriceRow]] = {}
+    for frequency in FREQUENCIES:
+        if frequency not in workbook.sheetnames:
+            continue
+        sheet = workbook[frequency]
+        iterator = sheet.iter_rows(values_only=True)
+        try:
+            header = next(iterator)
+        except StopIteration:
+            raise ValueError(f"sheet {frequency} is empty") from None
+        names = [str(value).strip().lower() if value is not None else "" for value in header]
+        required = ("date", "symbol", "adjusted_close")
+        if any(name not in names for name in required):
+            raise ValueError(f"sheet {frequency} must contain {required}")
+        index = {name: names.index(name) for name in required}
+        rows: list[PriceRow] = []
+        seen: set[tuple[str, date]] = set()
+        for row_number, values in enumerate(iterator, 2):
+            if not values or all(value in (None, "") for value in values):
+                continue
+            raw_date = values[index["date"]]
+            observed = raw_date.date() if isinstance(raw_date, datetime) else raw_date
+            if not isinstance(observed, date):
+                try:
+                    observed = date.fromisoformat(str(raw_date).strip())
+                except ValueError as exc:
+                    raise ValueError(f"invalid date in {frequency}!{row_number}") from exc
+            symbol = str(values[index["symbol"]] or "").strip()
+            try:
+                close = float(values[index["adjusted_close"]])
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"invalid adjusted_close in {frequency}!{row_number}") from exc
+            if not symbol or not isfinite(close) or close <= 0:
+                raise ValueError(f"invalid price row in {frequency}!{row_number}")
+            key = (symbol, observed)
+            if key in seen:
+                raise ValueError(f"duplicate symbol/date in {frequency}!{row_number}")
+            seen.add(key)
+            rows.append(PriceRow(observed, symbol, close))
+        if rows:
+            output[frequency] = sorted(rows, key=lambda row: (row.symbol, row.date))
+    if not output:
+        raise ValueError("workbook has no daily, weekly or monthly price sheets")
+    return output
+
+
+def load_price_workbook(path: str | Path) -> dict[str, list[PriceRow]]:
+    source = Path(path)
+    if not source.is_file():
+        raise FileNotFoundError(f"input workbook does not exist: {source}")
+    return parse_price_workbook(source.read_bytes())
 
 
 def daily_prices_to_csv(rows: Iterable[PriceRow]) -> str:
