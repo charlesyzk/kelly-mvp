@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kelly-mvp"
-version = "0.5.0"
-description = "Six-model rolling Kelly research validation framework"
+version = "0.6.0"
+description = "Pluggable strategy research framework with a six-model Kelly module"
 requires-python = ">=3.11"
 dependencies = [
   "numpy>=1.26",

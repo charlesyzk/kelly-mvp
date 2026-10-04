@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import csv
+import json
+from collections.abc import Mapping
 from dataclasses import asdict, fields
 from pathlib import Path
 from typing import Iterable
@@ -33,6 +35,8 @@ def _sheet(workbook: Workbook, name: str, rows: Iterable[object], row_type: type
             value = getattr(row, name)
             if hasattr(value, "isoformat"):
                 value = value.isoformat()
+            elif isinstance(value, Mapping):
+                value = json.dumps(value, ensure_ascii=False, sort_keys=True)
             values.append(value)
         sheet.append(values)
     sheet.freeze_panes = "A2"
@@ -40,6 +44,28 @@ def _sheet(workbook: Workbook, name: str, rows: Iterable[object], row_type: type
 
 
 def _conclusion_text(result: BacktestResult, comparisons: tuple[ComparisonResult, ...], config: StrategyConfig) -> str:
+    is_uploaded = bool(result.summaries) and all(
+        row.position_type == "TARGET" for row in result.summaries
+    )
+    if is_uploaded:
+        name = result.summaries[0].strategy_name
+        lines = [
+            f"用户策略样本外验证：{name}",
+            "",
+            "研究口径",
+            f"窗口：日 {config.windows['daily']}、周 {config.windows['weekly']}、月 {config.windows['monthly']}",
+            "仓位：上传策略 TARGET，经框架限制到 [-1,1]",
+            "Kelly 模型比较、Bootstrap 和 BH-FDR：不适用",
+            "交易成本：本阶段不启用",
+            "",
+            "结果",
+            f"逐期评价行数：{len(result.periods)}",
+            f"模拟调仓行数：{len(result.trades)}",
+        ]
+        if result.issues:
+            lines.extend(("", "数据和运行问题", *(f"- {issue}" for issue in result.issues)))
+        lines.extend(("", "本输出属于研究结果，不构成投资建议。"))
+        return "\n".join(lines) + "\n"
     eligible = sum(row.minimum_sample_met for row in comparisons)
     supported = [row for row in comparisons if row.supported_at_05]
     exploratory = [row for row in comparisons if row.exploratory_at_10]

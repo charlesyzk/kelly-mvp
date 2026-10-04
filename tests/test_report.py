@@ -4,7 +4,7 @@ from datetime import date, timedelta
 
 from openpyxl import load_workbook
 
-from kelly_mvp import PriceRow, StrategyConfig, run_backtest
+from kelly_mvp import PriceRow, StrategyConfig, load_user_strategy, run_backtest
 from kelly_mvp.report import write_outputs
 
 
@@ -27,6 +27,25 @@ class ReportTests(unittest.TestCase):
             self.assertIn("5% 正式支持", paths[6].read_text(encoding="utf-8"))
             self.assertIn("position_type", paths[2].read_text(encoding="utf-8-sig"))
             self.assertIn("action", paths[3].read_text(encoding="utf-8-sig"))
+
+    def test_uploaded_strategy_report_marks_kelly_statistics_not_applicable(self):
+        rows = [PriceRow(date(2020,1,1)+timedelta(days=i), "X", 100+i) for i in range(12)]
+        config = StrategyConfig(
+            windows={"daily":5,"weekly":2,"monthly":2},
+            minimum_matches={"daily":3,"weekly":1,"monthly":1},
+            bootstrap_blocks={"daily":2,"weekly":1,"monthly":1},
+            bootstrap_repetitions=10,
+        )
+        strategy = load_user_strategy(
+            'STRATEGY_META={"id":"quarter","name":"Quarter"}\ndef decide(context): return 0.25'
+        )
+        result = run_backtest({name: rows for name in ("daily","weekly","monthly")}, config, strategy)
+        with tempfile.TemporaryDirectory() as directory:
+            paths = write_outputs(result, directory, config)
+            conclusion = paths[6].read_text(encoding="utf-8")
+            self.assertIn("用户策略样本外验证：Quarter", conclusion)
+            self.assertIn("Bootstrap 和 BH-FDR：不适用", conclusion)
+            self.assertIn("TARGET", paths[0].read_text(encoding="utf-8-sig"))
 
 
 if __name__ == "__main__":

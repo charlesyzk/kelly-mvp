@@ -1,7 +1,7 @@
 import unittest
 from datetime import date, timedelta
 
-from kelly_mvp import PriceRow, StrategyConfig, classify_trade, run_backtest
+from kelly_mvp import PriceRow, StrategyConfig, classify_trade, load_user_strategy, run_backtest
 
 
 def prices(count=90, growth=1.001):
@@ -64,6 +64,28 @@ class BacktestTests(unittest.TestCase):
         bankrupt = [row for row in result.periods if row.bankrupt]
         self.assertTrue(bankrupt)
         self.assertTrue(all(row.truncated_log_growth is not None for row in bankrupt))
+
+    def test_uploaded_strategy_runs_through_the_same_no_lookahead_backtest(self):
+        source = '''
+STRATEGY_META = {"id": "always_long_quarter", "name": "始终四分之一仓位"}
+def decide(context):
+    return {"position": 0.25, "diagnostics": {"last_visible_price": context.prices[-1]}}
+'''
+        start = date(2020, 1, 1)
+        rows = [PriceRow(start + timedelta(days=index), "X", 100 + index) for index in range(12)]
+        config = StrategyConfig(windows={"daily": 5, "weekly": 2, "monthly": 2})
+        result = run_backtest(rows, config, load_user_strategy(source))
+        daily = [row for row in result.periods if row.frequency == "daily"]
+        self.assertTrue(daily)
+        self.assertTrue(all(row.model_id == "always_long_quarter" for row in daily))
+        self.assertTrue(all(row.position_type == "TARGET" for row in daily))
+        self.assertTrue(all(row.position_value == 0.25 for row in daily))
+        self.assertEqual(daily[0].diagnostics["last_visible_price"], rows[5].adjusted_close)
+        self.assertEqual(daily[0].return_date, rows[6].date)
+        self.assertEqual(
+            [row.evaluation_status for row in result.signals if row.frequency == "daily"][-1],
+            "pending",
+        )
 
 
 if __name__ == "__main__":

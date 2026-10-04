@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import date
 from math import isfinite, log
 from statistics import fmean, pstdev
@@ -11,7 +11,8 @@ from typing import Iterable, Mapping
 
 from .config import FREQUENCIES, MODEL_IDS, POSITION_TYPES, StrategyConfig
 from .data import PriceRow, aggregate_prices, split_by_symbol
-from .model import empirical_objective, solve_all_models
+from .model import empirical_objective, estimate_moments, solve_all_models
+from .module_strategy import KELLY_STRATEGY_ID, StrategyContext, StrategyDefinition
 
 
 PERIODS_PER_YEAR = {"daily": 252, "weekly": 52, "monthly": 12}
@@ -56,6 +57,8 @@ class SignalResult:
     wealth_floor: float
     status: str
     evaluation_status: str
+    strategy_name: str = "Kelly 六模型策略"
+    diagnostics: Mapping[str, str | int | float | bool | None] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,6 +105,8 @@ class PeriodResult:
     raw_solution_type: str
     safe_domain_type: str
     status: str
+    strategy_name: str = "Kelly 六模型策略"
+    diagnostics: Mapping[str, str | int | float | bool | None] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -133,6 +138,7 @@ class SummaryResult:
     exact_direction_agreement: float | None
     boundary_rate: float | None
     formal_sample_eligible: bool
+    strategy_name: str = "Kelly 六模型策略"
 
 
 @dataclass(frozen=True, slots=True)
@@ -154,6 +160,7 @@ class TradeResult:
     cumulative_wealth: float | None
     evaluation_status: str
     research_only: bool
+    strategy_name: str = "Kelly 六模型策略"
 
 
 @dataclass(frozen=True, slots=True)
@@ -294,14 +301,20 @@ def _summary(
         exact_direction_agreement=(sum(left * right > 0 for left, right in directional_pairs) / len(directional_pairs) if directional_pairs else None),
         boundary_rate=(sum(abs((row.position_value or 0.0) - lower_bound) <= 1e-10 or abs((row.position_value or 0.0) - upper_bound) <= 1e-10 for row in available) / len(available) if available else None),
         formal_sample_eligible=n >= minimum_matches,
+        strategy_name=first.strategy_name,
     )
 
 
 def run_backtest(
     prices: Iterable[PriceRow] | Mapping[str, Iterable[PriceRow]],
     config: StrategyConfig | None = None,
+    strategy: StrategyDefinition | None = None,
 ) -> BacktestResult:
     active = config or StrategyConfig()
+    if strategy is not None and strategy.kind == "uploaded":
+        return _run_uploaded_backtest(prices, active, strategy)
+    if strategy is not None and strategy.id != KELLY_STRATEGY_ID:
+        raise ValueError(f"unsupported top-level strategy: {strategy.id}")
     periods: list[PeriodResult] = []
     signals: list[SignalResult] = []
     issues: list[str] = []
@@ -443,5 +456,170 @@ def run_backtest(
         for signal in signals
         if (action := classify_trade(signal.previous_position, signal.position_value)) is not None
         for period in [period_lookup.get((signal.symbol, signal.frequency, signal.model_id, signal.position_type, signal.signal_date))]
+    )
+    return BacktestResult(tuple(periods), tuple(signals), trades, summaries, tuple(issues))
+
+
+def _run_uploaded_backtest(
+    prices: Iterable[PriceRow] | Mapping[str, Iterable[PriceRow]],
+    config: StrategyConfig,
+    strategy: StrategyDefinition,
+) -> BacktestResult:
+    """Run one trusted uploaded target-position strategy through the common audit chain."""
+
+    if strategy.decide is None:
+        raise ValueError(f"uploaded strategy {strategy.id} has no decide function")
+    periods: list[PeriodResult] = []
+    signals: list[SignalResult] = []
+    issues: list[str] = []
+    states: dict[tuple[str, str], tuple[float, float]] = {}
+    benchmark_states: dict[tuple[str, str], float] = {}
+
+    for frequency in FREQUENCIES:
+        rows = _frequency_rows(prices, frequency)
+        if not rows:
+            issues.append(f"{frequency}: no provider-supplied price series")
+            continue
+        for symbol, symbol_prices in split_by_symbol(rows).items():
+            returns = _returns(symbol_prices)
+            window = config.windows[frequency]
+            if len(returns) <= window:
+                issues.append(
+                    f"{symbol}/{frequency}: need at least {window + 2} prices; got {len(symbol_prices)}"
+                )
+                continue
+            key = (symbol, frequency)
+            for signal_index in range(window, len(returns) + 1):
+                sample = returns[signal_index - window:signal_index]
+                context = StrategyContext(
+                    symbol=symbol,
+                    frequency=frequency,
+                    signal_date=symbol_prices[signal_index].date,
+                    window_start_date=symbol_prices[signal_index - window].date,
+                    window_end_date=symbol_prices[signal_index].date,
+                    prices=tuple(
+                        row.adjusted_close
+                        for row in symbol_prices[signal_index - window:signal_index + 1]
+                    ),
+                    returns=tuple(sample),
+                )
+                decision = strategy.decide(context, config)
+                moments = estimate_moments(sample)
+                position = decision.position
+                previous, wealth = states.get(key, (0.0, 1.0))
+                change = position - previous
+                turnover = abs(change)
+                evaluated = signal_index < len(returns)
+                diagnostics = dict(decision.diagnostics)
+                common = dict(
+                    symbol=symbol,
+                    frequency=frequency,
+                    signal_date=symbol_prices[signal_index].date,
+                    window_start_date=symbol_prices[signal_index - window].date,
+                    window_end_date=symbol_prices[signal_index].date,
+                    window_size=window,
+                    model_id=strategy.id,
+                    position_type="TARGET",
+                    position_value=position,
+                    previous_position=previous,
+                    position_change=change,
+                    turnover=turnover,
+                    m1=moments.m1,
+                    m2=moments.m2,
+                    m3=moments.m3,
+                    m4=moments.m4,
+                    mu=moments.mu,
+                    nu2=moments.nu2,
+                    nu3=moments.nu3,
+                    nu4=moments.nu4,
+                    q1=moments.q1,
+                    q2=moments.q2,
+                    q3=moments.q3,
+                    q4=moments.q4,
+                    raw_objective=None,
+                    bounded_objective=decision.objective,
+                    safe_objective=decision.objective,
+                    position_objective=decision.objective,
+                    exact_empirical_objective_loss=None,
+                    solution_location=decision.optimizer_location,
+                    raw_solution_type="USER_TARGET",
+                    safe_domain_type="USER_BOUNDS",
+                    status="ok",
+                    strategy_name=strategy.name,
+                    diagnostics=diagnostics,
+                )
+                signals.append(SignalResult(
+                    **common,
+                    safe_domain_intervals="[]",
+                    kappa=config.convergence_kappa,
+                    wealth_floor=config.wealth_floor,
+                    evaluation_status="evaluated" if evaluated else "pending",
+                ))
+                if not evaluated:
+                    continue
+                next_return = returns[signal_index]
+                multiplier = 1 + position * next_return
+                feasible = multiplier > 0 and isfinite(multiplier)
+                bankrupt = not feasible
+                truncated = log(max(config.wealth_floor, multiplier))
+                wealth *= max(0.0, multiplier) if isfinite(multiplier) else 0.0
+                benchmark = benchmark_states.get(key, 1.0) * max(0.0, 1 + next_return)
+                benchmark_states[key] = benchmark
+                direction = None if abs(position) <= 1e-12 else position * next_return > 0
+                periods.append(PeriodResult(
+                    **common,
+                    return_date=symbol_prices[signal_index + 1].date,
+                    next_return=next_return,
+                    wealth_multiplier=multiplier,
+                    truncated_log_growth=truncated,
+                    direction_success=direction,
+                    wealth_feasible=feasible,
+                    bankrupt=bankrupt,
+                    cumulative_wealth=wealth,
+                    buy_hold_wealth=benchmark,
+                ))
+                states[key] = (position, wealth)
+
+    grouped: dict[tuple[str, str], list[PeriodResult]] = {}
+    for row in periods:
+        grouped.setdefault((row.symbol, row.frequency), []).append(row)
+    summaries = tuple(
+        _summary(
+            rows,
+            config.windows[frequency],
+            config.minimum_matches[frequency],
+            {},
+            config.lower_bound,
+            config.upper_bound,
+        )
+        for (_, frequency), rows in sorted(grouped.items())
+    )
+    period_lookup = {
+        (row.symbol, row.frequency, row.signal_date): row for row in periods
+    }
+    trades = tuple(
+        TradeResult(
+            signal.symbol,
+            signal.frequency,
+            signal.model_id,
+            signal.position_type,
+            signal.signal_date,
+            period.return_date if period else None,
+            action,
+            signal.previous_position,
+            signal.position_value,
+            signal.position_change,
+            signal.turnover,
+            period.next_return if period else None,
+            period.wealth_multiplier if period else None,
+            period.truncated_log_growth if period else None,
+            period.cumulative_wealth if period else None,
+            signal.evaluation_status,
+            False,
+            strategy.name,
+        )
+        for signal in signals
+        if (action := classify_trade(signal.previous_position, signal.position_value)) is not None
+        for period in [period_lookup.get((signal.symbol, signal.frequency, signal.signal_date))]
     )
     return BacktestResult(tuple(periods), tuple(signals), trades, summaries, tuple(issues))

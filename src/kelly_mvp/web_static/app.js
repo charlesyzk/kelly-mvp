@@ -1,17 +1,72 @@
-const state = { csvText: "", workbookBase64: null, priceSeries: null, result: null, tradePage: 0, tradePageSize: 25 };
+const state = { csvText: "", workbookBase64: null, priceSeries: null, strategyId: "KELLY_SIX_MODEL", strategySource: "", strategyFilename: "", result: null, tradePage: 0, tradePageSize: 25 };
 let kappaTimer = null;
 const $ = (selector) => document.querySelector(selector);
 const runButton = $("#run-button");
 const status = $("#status");
+const strategySelect = $("#strategy-select");
+const strategyFile = $("#strategy-file");
 const escapeHtml = (value) => String(value).replace(/[&<>'"]/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[c]));
 const pct = (value) => value == null ? "—" : `${(Number(value) * 100).toFixed(2)}%`;
 const num = (value, digits=4) => value == null ? "—" : Number(value).toFixed(digits);
 
 function setSource(text, name, series=null, workbookBase64=null) {
   state.csvText = text || ""; state.priceSeries = series; state.workbookBase64 = workbookBase64;
-  $("#file-label").textContent = name; runButton.disabled = false;
+  $("#file-label").textContent = name; updateRunAvailability();
   status.className = "status"; status.textContent = "行情已加载，尚未计算。";
 }
+
+function hasPriceSource() { return Boolean(state.csvText || state.workbookBase64 || state.priceSeries); }
+function updateRunAvailability() {
+  runButton.disabled = !hasPriceSource() || (state.strategyId === "uploaded" && !state.strategySource);
+}
+function applyStrategyMode() {
+  const uploaded = state.strategyId === "uploaded";
+  $("#strategy-upload").hidden = !uploaded;
+  $("#kelly-controls").hidden = uploaded;
+  $("#position-rule").querySelector("span").textContent = uploaded ? "上传策略仓位" : "Kelly 内部仓位";
+  $("#position-rule").querySelector("strong").textContent = uploaded ? "TARGET" : "RAW · BOUNDED · SAFE";
+  $("#strategy-description").textContent = uploaded
+    ? "按模板上传可信 Python 策略；框架统一完成无前视的下一期验证。"
+    : "完整运行六个 Kelly 模型及 RAW、BOUNDED、SAFE 三类独立仓位。";
+  $("#logic-title").textContent = uploaded ? "一个目标仓位，同一套验证链路" : "六个目标函数，三种独立求解";
+  $("#logic-caption").textContent = uploaded
+    ? "策略只读取当前窗口 · 框架限制仓位 · 下一期结果独立评价"
+    : "RAW 看模型原始倾向 · BOUNDED 限制敞口 · SAFE 再限制 Taylor 收敛域";
+  $("#empty-copy").textContent = uploaded
+    ? "加载策略和行情后，查看 TARGET 仓位的真实逐期计算。"
+    : "加载行情后，选择模型、仓位类型和频率查看真实逐期计算。";
+  status.textContent = hasPriceSource()
+    ? uploaded && !state.strategySource ? "行情已加载；请再上传策略文件。" : "行情已加载，尚未计算。"
+    : uploaded ? "先上传策略并加载行情，再运行验证。" : "先加载行情，再运行六模型验证。";
+  runButton.querySelector("span").textContent = uploaded ? "运行上传策略" : "按当前 κ 计算";
+  updateRunAvailability();
+}
+strategySelect.addEventListener("change", () => {
+  state.strategyId = strategySelect.value;
+  state.result = null;
+  $("#results").hidden = true;
+  $("#empty-state").hidden = false;
+  applyStrategyMode();
+});
+
+strategyFile.addEventListener("change", async () => {
+  const file = strategyFile.files[0];
+  if (!file) return;
+  if (!file.name.toLowerCase().endsWith(".py")) {
+    state.strategySource = "";
+    status.className = "status error";
+    status.textContent = "请选择 .py 策略文件。";
+    updateRunAvailability();
+    return;
+  }
+  state.strategySource = await file.text();
+  state.strategyFilename = file.name;
+  $("#strategy-file-label").textContent = file.name;
+  status.className = "status";
+  status.textContent = `已加载策略 ${file.name}；选择或拉取行情后即可计算。`;
+  updateRunAvailability();
+});
+applyStrategyMode();
 
 document.querySelectorAll(".source-tabs button").forEach((button) => button.addEventListener("click", () => {
   document.querySelectorAll(".source-tabs button").forEach((item) => item.classList.toggle("active", item === button));
@@ -66,7 +121,7 @@ $("#eodhd-fetch").addEventListener("click", async (event) => {
 function setKappa(value) {
   $("#kappa").value = value; $("#kappa-value").textContent = Number(value).toFixed(2);
   document.querySelectorAll("[data-kappa]").forEach((b) => b.classList.toggle("active", Number(b.dataset.kappa) === Number(value)));
-  if (state.result) {
+  if (state.result && state.strategyId === "KELLY_SIX_MODEL") {
     status.textContent = "κ 已改变，正在准备自动重算…";
     clearTimeout(kappaTimer);
     kappaTimer = setTimeout(() => runButton.click(), 450);
@@ -76,9 +131,14 @@ $("#kappa").addEventListener("input", (event) => setKappa(event.target.value));
 document.querySelectorAll("[data-kappa]").forEach((button) => button.addEventListener("click", () => setKappa(button.dataset.kappa)));
 
 runButton.addEventListener("click", async () => {
-  runButton.disabled = true; status.className = "status"; status.textContent = "正在运行六模型与三类仓位…";
+  const uploaded = state.strategyId === "uploaded";
+  runButton.disabled = true; status.className = "status"; status.textContent = uploaded ? "正在运行上传策略…" : "正在运行六模型与三类仓位…";
   try {
-    const payload = {convergence_kappa:Number($("#kappa").value)};
+    const payload = {strategy_id:state.strategyId, convergence_kappa:Number($("#kappa").value)};
+    if (uploaded) {
+      payload.strategy_source = state.strategySource;
+      payload.strategy_filename = state.strategyFilename;
+    }
     if (state.workbookBase64) payload.workbook_b64 = state.workbookBase64;
     else if (state.priceSeries) payload.price_series = state.priceSeries;
     else payload.csv_text = state.csvText;
@@ -87,11 +147,15 @@ runButton.addEventListener("click", async () => {
     state.result = data;
     fillSelect("#symbol-select", [...new Set(data.summaries.map((r) => r.symbol))]);
     fillSelect("#model-select", [...new Set(data.summaries.map((r) => r.model_id))]);
-    $("#model-select").value = "M4_SIMPLE";
+    fillSelect("#position-select", [...new Set(data.summaries.map((r) => r.position_type))]);
+    if (!uploaded) { $("#model-select").value = "M4_SIMPLE"; $("#position-select").value = "SAFE"; }
+    $("#download-statistics").hidden = uploaded;
     $("#empty-state").hidden = true; $("#results").hidden = false; render();
-    status.textContent = `完成 ${data.periods.length.toLocaleString("zh-CN")} 行逐期评价；κ=${data.config.convergence_kappa}.`;
+    status.textContent = uploaded
+      ? `完成 ${data.periods.length.toLocaleString("zh-CN")} 行逐期评价；策略 ${data.strategy.name}。`
+      : `完成 ${data.periods.length.toLocaleString("zh-CN")} 行逐期评价；κ=${data.config.convergence_kappa}。`;
   } catch (error) { status.className = "status error"; status.textContent = error.message; }
-  finally { runButton.disabled = false; runButton.querySelector("span").textContent = "按当前 κ 重新计算"; }
+  finally { updateRunAvailability(); runButton.querySelector("span").textContent = uploaded ? "重新运行上传策略" : "按当前 κ 重新计算"; }
 });
 
 function fillSelect(selector, values) { $(selector).innerHTML = values.map((v) => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join(""); }
@@ -111,7 +175,7 @@ function render() {
     ["累计收益",pct(summary.total_return),`买入持有 ${pct(summary.buy_hold_return)}`],
     ["最大回撤",pct(summary.max_drawdown),`覆盖率 ${pct(summary.coverage)}`],
   ].map((x) => `<article class="metric-card"><header><b>${x[0]}</b></header><div class="primary-metric"><strong>${x[1]}</strong><small>${x[2]}</small></div></article>`).join("") : "<p>该组合数据不足。</p>";
-  renderFrequencyOverview(); renderCharts(signals, rows); renderDiagnostics(summary); renderTradeTable(); renderTable(rows);
+  renderFrequencyOverview(); renderCharts(signals, rows); renderDiagnostics(summary, signals); renderTradeTable(); renderTable(rows);
   const latest = signals[signals.length-1]; $("#latest-position").textContent = latest ? `${latest.evaluation_status === "pending" ? "待验证" : "最新"} ${pct(latest.position_value)}` : "";
   const warnings = state.result.issues; $("#warnings").hidden = !warnings.length; $("#warnings").innerHTML = warnings.map((x) => `<div>${escapeHtml(x)}</div>`).join("");
 }
@@ -143,8 +207,14 @@ function renderCharts(signals, rows) {
   $("#position-caption").textContent=`${signals.length} 个信号`;$("#change-caption").textContent=`${rows.filter((r)=>r.position_change!=null&&Math.abs(r.position_change)>1e-12).length} 笔变化`;
   const last=rows[rows.length-1];$("#wealth-caption").textContent=last?`策略 ${num(last.cumulative_wealth,3)} · 持有 ${num(last.buy_hold_wealth,3)}`:"";
 }
-function renderDiagnostics(summary) {
-  const items=summary?[["平均绝对仓位",pct(summary.average_abs_position)],["相对经验精确平均仓位差",pct(summary.mean_abs_exact_position_gap)],["经验精确目标平均损失",num(summary.mean_exact_empirical_objective_loss,7)],["与经验精确方向一致率",pct(summary.exact_direction_agreement)],["触及 ±100% 边界",pct(summary.boundary_rate)],["财富可行率",pct(summary.wealth_feasibility_rate)]]:[];
+function renderDiagnostics(summary, signals) {
+  const uploaded=state.result?.strategy?.kind==="uploaded";
+  $("#diagnostic-title").textContent=uploaded?"上传策略诊断":"当前模型 / 经验精确 Kelly";
+  $("#diagnostic-caption").textContent=uploaded?"来自策略返回的 diagnostics，不参与仓位修正":"只作近似误差诊断，不改变正式判定";
+  const latest=signals[signals.length-1];
+  const items=uploaded
+    ? Object.entries(latest?.diagnostics||{}).map(([key,value])=>[key,escapeHtml(value)])
+    : summary?[["平均绝对仓位",pct(summary.average_abs_position)],["相对经验精确平均仓位差",pct(summary.mean_abs_exact_position_gap)],["经验精确目标平均损失",num(summary.mean_exact_empirical_objective_loss,7)],["与经验精确方向一致率",pct(summary.exact_direction_agreement)],["触及 ±100% 边界",pct(summary.boundary_rate)],["财富可行率",pct(summary.wealth_feasibility_rate)]]:[];
   $("#strategy-diagnostics").innerHTML=items.map(([label,value])=>`<div><span>${label}</span><strong>${value}</strong></div>`).join("");
 }
 function renderFrequencyOverview(){const f=selected(),names={daily:"日频",weekly:"周频",monthly:"月频"},rows=state.result.summaries.filter((r)=>r.symbol===f.symbol&&r.model_id===f.model&&r.position_type===f.position);$("#frequency-overview-grid").innerHTML=["daily","weekly","monthly"].map((frequency)=>{const row=rows.find((r)=>r.frequency===frequency);return `<article><b>${names[frequency]}</b>${row?`<span>准确 ${pct(row.direction_accuracy)}</span><span>收益 ${pct(row.total_return)}</span><span>回撤 ${pct(row.max_drawdown)}</span>`:"<span>数据不足</span>"}</article>`;}).join("");}

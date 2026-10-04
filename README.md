@@ -1,6 +1,13 @@
 # 高阶矩动态 Kelly 验证框架
 
-这是一个可审计的研究工具：用滚动历史收益估计矩，计算六种 Kelly 模型的仓位，再用严格的下一期收益验证。它不下单，也不承诺盈利。第一次使用可先看 [给朋友的使用说明](README_给朋友.md)。
+这是一个可插拔、可审计的策略研究工具。顶层可以切换完整 Kelly 策略或上传可信 Python 策略；框架统一完成数据处理、无前视滚动、下一期验证、净值和调仓审计。它不下单，也不承诺盈利。第一次使用可先看 [给朋友的使用说明](README_给朋友.md)。
+
+## 策略层级
+
+- `KELLY_SIX_MODEL` 是一套顶层策略模块。它内部同时运行六个模型及三类仓位，页面结果区再切换查看；六个公式不是六个互相孤立的顶层策略。
+- “上传 Python 策略”是另一种顶层模式。下载 [`user_strategy_template.py`](src/kelly_mvp/module_strategy/user_strategy_template.py)，实现 `STRATEGY_META` 和 `decide(context)` 后即可在网页上传。
+- 上传策略只返回目标仓位，框架限制到 `[-1,1]` 并标为 `TARGET`。它与 Kelly 共用日/周/月窗口、pending、下一期收益、净值和调仓流水，但不参加 Kelly 专属的 M2、Bootstrap、FDR 比较。
+- 当前按内部可信代码使用，不提供 Python 沙箱；不要上传来源不明的代码。
 
 ## 当前冻结口径
 
@@ -32,7 +39,7 @@ python3 -m pip install -e .
 python3 run_web.py
 ```
 
-Windows 将 `python3` 换成 `py`。打开 `http://127.0.0.1:8765`。页面可以载入明确标识的合成演示、上传日线 CSV、上传三工作表 Excel 或调用 EODHD；κ、模型、仓位和频率筛选均作用于后端真实结果，没有写死的策略数字。
+Windows 将 `python3` 换成 `py`。打开 `http://127.0.0.1:8765`。页面先选择 Kelly 或上传策略，再载入明确标识的合成演示、日线 CSV、三工作表 Excel 或 EODHD。Kelly 模式显示 κ、模型和仓位筛选；上传模式显示策略文件及模板入口。所有指标均来自后端真实结果。
 
 EODHD Token 只从服务端环境变量读取，不进入浏览器、源码、报告或日志。历史参考代码中曾出现硬编码凭据，不能继续使用，建议账户持有人轮换。
 
@@ -76,6 +83,15 @@ PYTHONPATH=src python3 -m kelly_mvp \
   --output outputs/excel_k080_20260907
 ```
 
+上传策略也可从命令行运行：
+
+```bash
+PYTHONPATH=src python3 -m kelly_mvp \
+  --input /absolute/path/to/prices.xlsx \
+  --strategy-file /absolute/path/to/my_strategy.py \
+  --output outputs/my_strategy_20260907
+```
+
 ### CSV（日线兼容输入）
 
 CSV 列为 `date,symbol,adjusted_close`。只有日线时，程序会保守聚合完整周/月，用于兼容、演示和交叉核验；正式研究优先使用 EODHD 或 Excel 的直接三频数据，不能把聚合结果冒充供应商正式周/月序列。`test/DEXUSEU_FRED.csv` 是公开真实测试数据，来源与哈希见 `test/README.md`，只证明工程链路可运行。
@@ -108,7 +124,7 @@ G4(f) = q1·f - q2·f²/2 + q3·f³/3 - q4·f⁴/4
 
 财富倍数保留为 `1+fR_next`。若不大于 0，仍记录破产；统计使用 `log(max(1+fR_next,1e-12))` 给予有限惩罚。零仓位进入覆盖率和平均增长，但不进入方向准确率；非零仓位遇到零收益算方向失败。
 
-## 本轮改动记录（0.5）
+## 本轮改动记录（0.6）
 
 - 单一 `M4_SIMPLE + Half Kelly` 改为六模型统一计算；窗口改为 252/104/60。
 - 仓位改为独立 `RAW / BOUNDED / SAFE`，加入 κ 按钮、配置及完整安全域输出。
@@ -119,6 +135,7 @@ G4(f) = q1·f - q2·f²/2 + q3·f³/3 - q4·f⁴/4
 - 输出统一为五个 CSV、一个 XLSX、一个 TXT；恢复逐笔操作、分页、净值图、完整仓位/变动图和经验精确诊断。
 - 将十二个窗口矩、目标函数值、经验精确目标损失及求解位置写入逐期与信号输出，恢复直接复算能力。
 - 增加六模型、SAFE、三频输入、统计复现、报告和网页契约测试。
+- 增加顶层策略注册表和上传模板；Kelly 作为完整模块保留内部六模型/三仓位，上传策略使用同一审计链路并输出 `TARGET`。
 
 旧版模型、窗口、仓位和统计口径均已改变，旧结果不能与 0.5 直接拼接或继续称为同一基线。
 

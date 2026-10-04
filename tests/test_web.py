@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 from kelly_mvp.data import PriceRow, parse_daily_prices
 from kelly_mvp.demo import generate_demo_csv
-from kelly_mvp.web import STATIC_DIR, calculate_payload, fetch_eodhd_payload
+from kelly_mvp.web import STATIC_DIR, calculate_payload, fetch_eodhd_payload, strategy_catalog_payload
 
 
 class WebTests(unittest.TestCase):
@@ -21,6 +21,11 @@ class WebTests(unittest.TestCase):
         self.assertIn("模拟逐笔买卖操作", html)
         self.assertIn("下载调仓流水 CSV", html)
         self.assertIn("策略净值 / 买入持有", html)
+        self.assertIn("Kelly 六模型策略", html)
+        self.assertIn("上传 Python 策略", html)
+        self.assertIn("/strategy-template.py", html)
+        self.assertIn("一个目标仓位，同一套验证链路", script)
+        self.assertNotIn("kelly-fraction-field", script)
 
     @patch("kelly_mvp.web.fetch_price_bundle")
     def test_eodhd_payload_keeps_provider_frequencies(self, fetch):
@@ -36,6 +41,27 @@ class WebTests(unittest.TestCase):
         self.assertEqual({row["position_type"] for row in result["summaries"]}, {"RAW","BOUNDED","SAFE"})
         self.assertTrue(result["statistics"])
         self.assertTrue(result["trades"])
+
+    def test_uploaded_strategy_uses_target_and_skips_kelly_statistics(self):
+        source = '''
+STRATEGY_META = {"id": "quarter", "name": "Quarter"}
+def decide(context):
+    return {"position": 0.25, "diagnostics": {"visible": context.prices[-1]}}
+'''
+        result = calculate_payload({
+            "csv_text": generate_demo_csv(),
+            "strategy_id": "uploaded",
+            "strategy_source": source,
+            "strategy_filename": "quarter.py",
+        })
+        self.assertEqual(result["strategy"]["id"], "quarter")
+        self.assertEqual({row["model_id"] for row in result["summaries"]}, {"quarter"})
+        self.assertEqual({row["position_type"] for row in result["summaries"]}, {"TARGET"})
+        self.assertEqual(result["statistics"], [])
+
+    def test_strategy_catalog_has_one_kelly_module(self):
+        catalog = strategy_catalog_payload()["strategies"]
+        self.assertEqual([row["id"] for row in catalog], ["KELLY_SIX_MODEL"])
 
 
 if __name__ == "__main__":

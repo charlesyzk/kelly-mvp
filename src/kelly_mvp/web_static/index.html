@@ -16,7 +16,22 @@
   <main id="top" class="workspace">
     <aside class="control-panel" aria-labelledby="control-title">
       <div class="panel-heading"><p>运行设置</p><span>日 252 · 周 104 · 月 60</span></div>
-      <h2 id="control-title">加载复权价格</h2>
+      <h2 id="control-title">选择策略模块</h2>
+      <label class="strategy-picker">
+        <span>顶层策略</span>
+        <select id="strategy-select">
+          <option value="KELLY_SIX_MODEL">Kelly 六模型策略</option>
+          <option value="uploaded">上传 Python 策略</option>
+        </select>
+      </label>
+      <p id="strategy-description" class="strategy-description">完整运行六个 Kelly 模型及 RAW、BOUNDED、SAFE 三类独立仓位。</p>
+      <div id="strategy-upload" class="strategy-upload" hidden>
+        <label for="strategy-file"><input id="strategy-file" type="file" accept=".py,text/x-python"><span id="strategy-file-label">选择 .py 策略文件</span></label>
+        <a href="/strategy-template.py" download>下载策略模板</a>
+        <small>模板只能看到截至信号日的窗口数据；框架负责下一期评价与审计。</small>
+      </div>
+
+      <h2>加载复权价格</h2>
       <div class="source-tabs" role="tablist" aria-label="行情来源">
         <button class="active" data-source="csv" type="button">上传 CSV / Excel</button>
         <button data-source="eodhd" type="button">EODHD 三频</button>
@@ -39,7 +54,7 @@
         <p id="eodhd-config-status" class="api-note">正在检查服务端 Token…</p>
       </section>
 
-      <section class="kappa-control" aria-labelledby="kappa-title">
+      <section id="kelly-controls" class="kappa-control" aria-labelledby="kappa-title">
         <div><span id="kappa-title">收敛安全比例 κ</span><strong id="kappa-value">0.80</strong></div>
         <input id="kappa" type="range" min="0.10" max="0.99" step="0.01" value="0.80">
         <div class="kappa-presets">
@@ -49,19 +64,19 @@
         </div>
         <small>按钮只改变预先声明的数学安全域；系统不会寻找历史收益最高的 κ。</small>
       </section>
-      <div class="fixed-rule"><span>三类仓位</span><strong>RAW · BOUNDED · SAFE</strong></div>
+      <div id="position-rule" class="fixed-rule"><span>Kelly 内部仓位</span><strong>RAW · BOUNDED · SAFE</strong></div>
       <button class="run-button" id="run-button" type="button" disabled><span>按当前 κ 计算</span><b>→</b></button>
       <p class="status" id="status" role="status">先加载行情，再运行六模型验证。</p>
     </aside>
 
     <section class="main-stage">
       <section class="logic-strip">
-        <div class="logic-heading"><p>研究契约</p><h2>六个目标函数，三种独立求解</h2></div>
-        <p class="logic-caption">RAW 看模型原始倾向 · BOUNDED 限制敞口 · SAFE 再限制 Taylor 收敛域</p>
+        <div class="logic-heading"><p>研究契约</p><h2 id="logic-title">六个目标函数，三种独立求解</h2></div>
+        <p id="logic-caption" class="logic-caption">RAW 看模型原始倾向 · BOUNDED 限制敞口 · SAFE 再限制 Taylor 收敛域</p>
       </section>
       <section id="empty-state" class="empty-state">
         <div class="empty-orbit"><span>M2</span><span>M3</span><span>M4</span><span>EX</span><b>f</b></div>
-        <h2>结果会在这里展开</h2><p>加载行情后，选择模型、仓位类型和频率查看真实逐期计算。</p>
+        <h2>结果会在这里展开</h2><p id="empty-copy">加载行情后，选择模型、仓位类型和频率查看真实逐期计算。</p>
       </section>
       <section id="results" class="results" hidden>
         <div class="result-toolbar filter-grid">
@@ -75,7 +90,7 @@
         <section class="position-workbench">
           <header class="workbench-heading"><div><p>POSITION AUDIT</p><h2>仓位与下一期结果</h2></div><strong id="latest-position"></strong></header>
           <section class="diagnostic-band" aria-label="模型与经验精确 Kelly 诊断">
-            <header><b>当前模型 / 经验精确 Kelly</b><span>只作近似误差诊断，不改变正式判定</span></header>
+            <header><b id="diagnostic-title">当前模型 / 经验精确 Kelly</b><span id="diagnostic-caption">只作近似误差诊断，不改变正式判定</span></header>
             <div id="strategy-diagnostics" class="diagnostic-grid"></div>
           </section>
           <div class="position-panels">

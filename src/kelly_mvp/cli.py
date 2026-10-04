@@ -10,6 +10,7 @@ from .backtest import run_backtest
 from .config import StrategyConfig
 from .data import load_daily_prices, load_price_workbook
 from .eodhd import fetch_price_bundle
+from .module_strategy import KELLY_STRATEGY_ID, get_builtin_strategy, load_user_strategy
 from .report import write_outputs
 
 
@@ -23,6 +24,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--output", required=True, help="new output directory")
     parser.add_argument("--config", help="optional JSON configuration")
     parser.add_argument("--kappa", type=float, help="override the pre-registered SAFE parameter")
+    parser.add_argument("--strategy-file", help="trusted Python strategy implementing the upload template")
     return parser
 
 
@@ -50,7 +52,15 @@ def main(argv: list[str] | None = None) -> int:
     except (FileNotFoundError, RuntimeError, ValueError) as exc:
         print(f"Data error: {exc}")
         return 2
-    result = run_backtest(rows, config)
+    strategy = get_builtin_strategy(KELLY_STRATEGY_ID)
+    if args.strategy_file:
+        source = Path(args.strategy_file)
+        try:
+            strategy = load_user_strategy(source.read_text(encoding="utf-8"), source.name)
+        except (FileNotFoundError, OSError, UnicodeError, ValueError) as exc:
+            print(f"Strategy error: {exc}")
+            return 2
+    result = run_backtest(rows, config, strategy)
     if not result.periods:
         print("No evaluable periods were produced.")
         for issue in result.issues:
