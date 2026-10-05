@@ -7,7 +7,13 @@ from unittest.mock import patch
 
 from kelly_mvp.data import PriceRow
 from kelly_mvp.eodhd import EODHDHTTPError
-from kelly_mvp.market_jobs import create_fetch_job, pause_fetch_job, resume_fetch_job, run_fetch_job
+from kelly_mvp.market_jobs import (
+    _quota_remaining,
+    create_fetch_job,
+    pause_fetch_job,
+    resume_fetch_job,
+    run_fetch_job,
+)
 from kelly_mvp.market_store import MarketStore
 from kelly_mvp.universes import _global_index_members
 from kelly_mvp.web import STATIC_DIR, market_catalog_payload, market_export_csv
@@ -26,6 +32,16 @@ class MarketStoreTests(unittest.TestCase):
             collection_id, name, "https://example.test/list.csv", "test mapping",
             f"sha-{collection_id}", "unknown", "test snapshot", members,
         )
+
+    def test_extra_calls_are_only_available_when_explicitly_enabled(self):
+        usage = {
+            "apiRequests": "20",
+            "apiRequestsDate": date.today().isoformat(),
+            "dailyRateLimit": "20",
+            "extraLimit": "500",
+        }
+        self.assertEqual(_quota_remaining(usage), 0)
+        self.assertEqual(_quota_remaining(usage, allow_extra_calls=True), 500)
 
     def test_snapshots_keep_membership_but_prices_are_symbol_frequency_deduplicated(self):
         shared = {"symbol":"SHARED.US","source_symbol":"SHARED","name":"Shared Corp","asset_type":"stock"}

@@ -43,7 +43,7 @@ def _provider_request_slot():
             _LAST_PROVIDER_REQUEST = time.monotonic()
 
 
-def _quota_remaining(usage: dict[str, object]) -> int | None:
+def _quota_remaining(usage: dict[str, object], *, allow_extra_calls: bool = False) -> int | None:
     try:
         limit = int(usage["dailyRateLimit"])
         spent = int(usage.get("apiRequests", 0) or 0)
@@ -59,8 +59,13 @@ def _quota_remaining(usage: dict[str, object]) -> int | None:
     }
     if usage_date and usage_date not in current_dates:
         spent = 0
-    # Do not consume separately purchased extra calls without an explicit UI budget setting.
-    return max(0, limit - spent)
+    available = max(0, limit - spent)
+    if allow_extra_calls:
+        try:
+            available += max(0, int(usage.get("extraLimit", 0) or 0))
+        except (TypeError, ValueError):
+            pass
+    return available
 
 
 def _safe_usage_snapshot(store: MarketStore, job_id: str) -> dict[str, object] | None:
@@ -123,7 +128,8 @@ def create_fetch_job(store: MarketStore, collection_ids: list[str], frequencies:
     return job_id
 
 
-def _validate_exchange_universes(store: MarketStore, job_id: str, symbols: list[str]) -> bool:
+def _validate_exchange_universes(store: MarketStore, job_id: str, symbols: list[str], *,
+                                 allow_extra_calls: bool = False) -> bool:
     exchanges = sorted({s.rsplit(".", 1)[-1].upper() for s in symbols if "." in s})
     if not exchanges:
         return True
@@ -134,7 +140,7 @@ def _validate_exchange_universes(store: MarketStore, job_id: str, symbols: list[
         usage = _safe_usage_snapshot(store, job_id)
         if usage is None:
             return False
-        remaining = _quota_remaining(usage)
+        remaining = _quota_remaining(usage, allow_extra_calls=allow_extra_calls)
         if remaining is None or remaining < 1:
             store.update_job(job_id, status="paused_quota", message="额度不足，未继续请求交易所代码目录")
             return False
@@ -183,6 +189,7 @@ def _validate_exchange_universes(store: MarketStore, job_id: str, symbols: list[
 
 
 def run_fetch_job(store: MarketStore, job_id: str, *, batch_size: int = 30,
+                  allow_extra_calls: bool = False,
                   progress: Callable[[str], None] | None = None) -> dict[str, object]:
     if not os.getenv("EODHD_API_TOKEN", "").strip():
         store.update_job(job_id, status="needs_token", message="未配置 EODHD_API_TOKEN；未发送供应商请求")
@@ -192,7 +199,8 @@ def run_fetch_job(store: MarketStore, job_id: str, *, batch_size: int = 30,
     if not detail:
         raise ValueError("取数任务不存在")
     all_symbols = sorted({item["symbol"] for item in detail["items"]})
-    if not _validate_exchange_universes(store, job_id, all_symbols):
+    if not _validate_exchange_universes(store, job_id, all_symbols,
+                                        allow_extra_calls=allow_extra_calls):
         return store.job_detail(job_id) or {}
     done_in_batch = 0
     while True:
@@ -222,7 +230,7 @@ def run_fetch_job(store: MarketStore, job_id: str, *, batch_size: int = 30,
             usage = _safe_usage_snapshot(store, job_id)
             if usage is None:
                 break
-            remaining = _quota_remaining(usage)
+            remaining = _quota_remaining(usage, allow_extra_calls=allow_extra_calls)
             if remaining is None:
                 store.update_job(job_id, status="needs_attention", message="无法解析账户额度；为防止超额已暂停")
                 break

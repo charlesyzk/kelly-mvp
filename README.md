@@ -57,7 +57,7 @@ kelly-market-data fetch --collection sp500 --collection csi300 --batch-size 30
 kelly-market-data fetch --collection sp500 --exchange US --batch-size 30
 ```
 
-首次用整段历史请求同时发现各代码、频率最早可用日期，不额外发探测请求；增量更新回退45天重叠。请求按额度分批、串行执行，遇额度不足或限速会暂停，可续跑并重试失败项。交易所目录快照七天复用；仅读取每日额度，不自动使用已购 extra calls。NASDAQ Composite 清单是重构候选集；`WISGP.INDX`、`BVSP.INDX` 尚待验证。当前成分股快照回测存在幸存者偏差风险。详见 [EODHD 额度与限速说明](https://eodhd.com/financial-apis/api-limits)。
+首次用整段历史请求同时发现各代码、频率最早可用日期，不额外发探测请求；增量更新回退45天重叠。请求按额度分批、串行执行，遇额度不足或限速会暂停，可续跑并重试失败项。交易所目录快照七天复用；默认只使用每日额度，只有明确传入 `--use-extra-calls` 才允许 EODHD 消耗已购 extra calls。NASDAQ Composite 清单是重构候选集；`WISGP.INDX`、`BVSP.INDX` 尚待验证。当前成分股快照回测存在幸存者偏差风险。详见 [EODHD 额度与限速说明](https://eodhd.com/financial-apis/api-limits)。
 
 Token 仅通过服务端环境变量 `EODHD_API_TOKEN` 提供，不进入源码、日志、报告或行情库。
 

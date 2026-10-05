@@ -24,11 +24,15 @@ def _parser() -> argparse.ArgumentParser:
     fetch.add_argument("--batch-size", type=int, default=30, help="maximum EOD requests per quota checkpoint")
     fetch.add_argument("--exchange", help="restrict to one EODHD exchange suffix, e.g. US, SHE, SHG or INDX")
     fetch.add_argument("--symbols", help="comma-separated code subset, limited to selected collections")
+    fetch.add_argument("--use-extra-calls", action="store_true",
+                       help="allow EODHD to spend the account's purchased extra calls after daily calls run out")
     status = sub.add_parser("status", help="show collections and recent data jobs")
     status.add_argument("--job-id")
     resume = sub.add_parser("resume", help="resume pending or failed items in a job")
     resume.add_argument("job_id")
     resume.add_argument("--batch-size", type=int, default=30)
+    resume.add_argument("--use-extra-calls", action="store_true",
+                        help="allow EODHD to spend the account's purchased extra calls after daily calls run out")
     pause = sub.add_parser("pause", help="pause a running job after its current request")
     pause.add_argument("job_id")
     return parser
@@ -60,7 +64,8 @@ def main(argv: list[str] | None = None) -> int:
             job_id = create_fetch_job(store, collections, args.frequency or list(FREQUENCIES), symbols,
                                       exchange_filter=args.exchange or "")
             print(f"任务已创建：{job_id}")
-            detail = run_fetch_job(store, job_id, batch_size=max(1, args.batch_size), progress=print)
+            detail = run_fetch_job(store, job_id, batch_size=max(1, args.batch_size),
+                                   allow_extra_calls=args.use_extra_calls, progress=print)
             print(json.dumps(detail["job"], ensure_ascii=False, indent=2))
             return 0 if detail["job"]["status"] in {"completed", "completed_with_issues"} else 2
         if args.command == "resume":
@@ -69,7 +74,8 @@ def main(argv: list[str] | None = None) -> int:
                 print("找不到该任务", file=sys.stderr)
                 return 2
             resume_fetch_job(store, args.job_id, batch_size=max(1, args.batch_size), run_async=False)
-            detail = run_fetch_job(store, args.job_id, batch_size=max(1, args.batch_size), progress=print)
+            detail = run_fetch_job(store, args.job_id, batch_size=max(1, args.batch_size),
+                                   allow_extra_calls=args.use_extra_calls, progress=print)
             print(json.dumps(detail["job"], ensure_ascii=False, indent=2))
             return 0 if detail["job"]["status"] in {"completed", "completed_with_issues"} else 2
         if args.command == "pause":
