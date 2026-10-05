@@ -9,7 +9,7 @@ from datetime import date
 from math import isfinite
 from typing import Callable
 from urllib.parse import urlencode
-from urllib.request import Request, urlopen
+from urllib.request import HTTPError, Request, urlopen
 
 from .config import FREQUENCIES
 from .data import PriceRow
@@ -19,6 +19,15 @@ EODHD_BASE_URL = "https://eodhd.com/api/eod"
 MAX_RESPONSE_BYTES = 50 * 1024 * 1024
 _SYMBOL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 HttpTransport = Callable[[str, float], object]
+
+
+class EODHDHTTPError(RuntimeError):
+    """Provider HTTP error with safe status metadata and no request URL."""
+
+    def __init__(self, status_code: int, retry_after: float | None = None):
+        self.status_code = status_code
+        self.retry_after = retry_after
+        super().__init__(f"EODHD HTTP {status_code}")
 
 
 def _date(value: str | date, name: str) -> date:
@@ -71,8 +80,16 @@ def build_eodhd_url(
 
 def _default_transport(url: str, timeout_seconds: float) -> object:
     request = Request(url, headers={"User-Agent": "kelly-mvp/0.5"})
-    with urlopen(request, timeout=timeout_seconds) as response:  # nosec B310
-        raw = response.read(MAX_RESPONSE_BYTES + 1)
+    try:
+        with urlopen(request, timeout=timeout_seconds) as response:  # nosec B310
+            raw = response.read(MAX_RESPONSE_BYTES + 1)
+    except HTTPError as exc:
+        retry_after = exc.headers.get("Retry-After") if exc.headers else None
+        try:
+            retry_seconds = float(retry_after) if retry_after else None
+        except ValueError:
+            retry_seconds = None
+        raise EODHDHTTPError(exc.code, retry_seconds) from None
     if len(raw) > MAX_RESPONSE_BYTES:
         raise ValueError("EODHD响应超过50MB上限")
     return json.loads(raw.decode("utf-8"))
@@ -95,7 +112,7 @@ def fetch_prices(
     url = build_eodhd_url(normalized_symbol, start, end, token, frequency)
     try:
         payload = (http_transport or _default_transport)(url, timeout_seconds)
-    except (ValueError, json.JSONDecodeError):
+    except (ValueError, json.JSONDecodeError, EODHDHTTPError):
         raise
     except Exception as exc:
         raise RuntimeError(f"EODHD请求失败（{type(exc).__name__}）") from None
@@ -160,3 +177,63 @@ def fetch_price_bundle(
         )
         for frequency in FREQUENCIES
     }
+
+
+def _fetch_json_endpoint(url: str, timeout_seconds: float = 30.0) -> object:
+    request = Request(url, headers={"User-Agent": "kelly-mvp/0.6"})
+    try:
+        with urlopen(request, timeout=timeout_seconds) as response:  # nosec B310
+            raw = response.read(MAX_RESPONSE_BYTES + 1)
+    except HTTPError as exc:
+        retry_after = exc.headers.get("Retry-After") if exc.headers else None
+        try:
+            retry_seconds = float(retry_after) if retry_after else None
+        except ValueError:
+            retry_seconds = None
+        raise EODHDHTTPError(exc.code, retry_seconds) from None
+    except Exception as exc:
+        raise RuntimeError(f"EODHD请求失败（{type(exc).__name__}）") from None
+    if len(raw) > MAX_RESPONSE_BYTES:
+        raise ValueError("EODHD响应超过50MB上限")
+    try:
+        return json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        raise ValueError("EODHD返回的JSON无法解析") from None
+
+
+def fetch_account_usage(*, api_token: str | None = None, timeout_seconds: float = 30.0) -> dict[str, object]:
+    """Read account quota. EODHD documents /api/user as a zero-call endpoint."""
+    token = api_token if api_token is not None else os.getenv("EODHD_API_TOKEN", "")
+    if not isinstance(token, str) or not token.strip():
+        raise ValueError("服务端尚未配置 EODHD_API_TOKEN")
+    url = "https://eodhd.com/api/user?" + urlencode({"api_token": token.strip(), "fmt": "json"})
+    payload = _fetch_json_endpoint(url, timeout_seconds)
+    if not isinstance(payload, dict):
+        raise ValueError("EODHD用量接口返回格式错误")
+    return payload
+
+
+def fetch_exchange_symbols(exchange: str, *, api_token: str | None = None,
+                           timeout_seconds: float = 45.0) -> set[str]:
+    """Read one EODHD exchange symbol directory for bulk prevalidation."""
+    token = api_token if api_token is not None else os.getenv("EODHD_API_TOKEN", "")
+    if not isinstance(token, str) or not token.strip():
+        raise ValueError("服务端尚未配置 EODHD_API_TOKEN")
+    normalized = str(exchange).strip().upper()
+    if not re.fullmatch(r"[A-Z0-9_-]{1,16}", normalized):
+        raise ValueError("EODHD交易所代码格式错误")
+    url = f"https://eodhd.com/api/exchange-symbol-list/{normalized}?" + urlencode(
+        {"api_token": token.strip(), "fmt": "json"}
+    )
+    payload = _fetch_json_endpoint(url, timeout_seconds)
+    if not isinstance(payload, list):
+        raise ValueError(f"EODHD {normalized} 代码列表返回格式错误")
+    codes: set[str] = set()
+    for item in payload:
+        if not isinstance(item, dict):
+            continue
+        raw_code = item.get("Code", item.get("code", item.get("Code")))
+        if isinstance(raw_code, str) and raw_code.strip():
+            codes.add(raw_code.strip().upper())
+            codes.add(f"{raw_code.strip().upper()}.{normalized}")
+    return codes

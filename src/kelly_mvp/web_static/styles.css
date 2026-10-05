@@ -64,7 +64,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-v
 .strategy-upload input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
 .strategy-upload a { display: inline-block; margin-top: 9px; color: #a9c1ff; font-size: 10px; }
 .strategy-upload small { display: block; margin-top: 6px; color: #94a3b1; font-size: 9px; line-height: 1.5; }
-.source-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 3px; margin-bottom: 12px; background: #122031; padding: 3px; }
+.source-tabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; margin-bottom: 12px; background: #122031; padding: 3px; }
 .source-tabs button { min-height: 36px; border: 0; background: transparent; color: #94a3b1; cursor: pointer; font-size: 11px; }
 .source-tabs button.active { background: #31465c; color: white; }
 .source-panel[hidden] { display: none; }
@@ -86,6 +86,12 @@ button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-v
 .api-note { margin: 9px 0 0; line-height: 1.45; }
 .api-note.ready { color: #78d7c9; }
 .api-note.error { color: #ffaaa0; }
+.privacy a { color: var(--blue); text-decoration: underline; }
+.market-search { margin-top: 10px; }
+.market-select-actions { display: flex; gap: 8px; margin-top: 7px; }
+.market-select-actions button { flex: 1; min-height: 34px; border: 1px solid #506275; background: #213347; color: #c8d7ff; cursor: pointer; font-size: 10px; }
+.api-source select[multiple] { min-height: 90px; padding: 6px; color: white; background: #213347; border: 1px solid #506275; }
+.api-source select[multiple] option { padding: 3px; }
 .field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 18px; }
 .field-grid label[hidden] { display: none; }
 .field-grid label { display: flex; flex-direction: column; gap: 5px; font-size: 11px; color: #bcc7d1; }
@@ -155,9 +161,10 @@ select { border: 1px solid var(--grid); background: white; padding: 0 34px 0 12p
 #frequency-overview-grid article { padding: 13px 15px; border-right: 1px solid var(--grid); display: grid; grid-template-columns: auto repeat(3,1fr); gap: 10px; font-size: 9px; }
 #frequency-overview-grid article:last-child { border-right: 0; }
 #frequency-overview-grid article span { color: var(--muted); text-align: right; }
-.primary-metric { margin: 22px 0; display: flex; align-items: end; gap: 16px; }
+.primary-metric { margin: 22px 0; display: flex; align-items: end; gap: 16px; flex-wrap: wrap; }
 .primary-metric strong { font-family: "Arial Narrow", "Avenir Next Condensed", sans-serif; font-size: 45px; line-height: .9; letter-spacing: -.04em; }
 .primary-metric small { color: var(--muted); font-size: 10px; }
+.primary-metric .benchmark-period { width: 100%; color: #607587; font-family: Menlo, monospace; font-size: 9px; }
 .metric-list { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 14px; }
 .metric-list div { border-top: 1px solid #dce4e9; padding-top: 8px; }
 .metric-list span { display: block; color: var(--muted); font-size: 9px; }.metric-list b { font-size: 12px; }

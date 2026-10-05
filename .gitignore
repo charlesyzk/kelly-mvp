@@ -9,5 +9,8 @@ test/SP500_FRED.metadata.json
 .venv/
 .env
 .env.*
+data/*.sqlite3
+data/*.sqlite3-shm
+data/*.sqlite3-wal
 dist/
 *.egg-info/

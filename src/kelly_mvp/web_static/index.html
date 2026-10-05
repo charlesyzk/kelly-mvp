@@ -10,7 +10,7 @@
   <header class="masthead">
     <a class="brand" href="#top" aria-label="返回顶部"><span>K</span><i>/</i><strong>6</strong></a>
     <div class="mast-copy"><p class="eyebrow">六模型 · 三类仓位 · 下一期验证</p><h1>先固定规则，<br>再让结果说话。</h1></div>
-    <div class="privacy"><span></span>计算留在本机</div>
+    <div class="privacy"><span></span>计算留在本机 · <a href="/data">行情管理</a></div>
   </header>
 
   <main id="top" class="workspace">
@@ -35,6 +35,7 @@
       <div class="source-tabs" role="tablist" aria-label="行情来源">
         <button class="active" data-source="csv" type="button">上传 CSV / Excel</button>
         <button data-source="eodhd" type="button">EODHD 三频</button>
+        <button data-source="market" type="button">本地清单</button>
       </div>
       <section id="csv-source" class="source-panel">
         <label class="drop-zone" id="drop-zone" for="file-input">
@@ -52,6 +53,14 @@
         </div>
         <button class="fetch-button" id="eodhd-fetch" type="button">拉取日 周 月真实行情</button>
         <p id="eodhd-config-status" class="api-note">正在检查服务端 Token…</p>
+      </section>
+      <section id="market-source" class="source-panel api-source" hidden>
+        <label><span>数据清单（可多选）</span><select id="market-collection-select" multiple size="4"></select></label>
+        <label><span>交易所</span><select id="market-exchange-select"><option value="">全部交易所</option></select></label>
+        <label class="market-search"><span>代码或名称筛选</span><input id="market-symbol-query" type="search" placeholder="例如 AAPL.US 或 Apple"></label>
+        <label><span>代码（可多选）</span><select id="market-symbol-select" multiple size="8"></select></label>
+        <div class="market-select-actions"><button type="button" id="market-select-visible">全选当前结果</button><button type="button" id="market-clear-selection">清空</button></div>
+        <p id="market-selection-note" class="api-note">选择清单后载入本地已保存代码。缺少分频行情时会创建补数任务。</p>
       </section>
 
       <section id="kelly-controls" class="kappa-control" aria-labelledby="kappa-title">
@@ -86,7 +95,7 @@
           <label>频率<select id="frequency-select"><option value="daily">日频</option><option value="weekly">周频</option><option value="monthly">月频</option></select></label>
         </div>
         <div id="metric-cards" class="metric-cards"></div>
-        <section class="frequency-overview"><header><b>三频对照</b><span>同一模型与仓位类型</span></header><div id="frequency-overview-grid"></div></section>
+        <section class="frequency-overview"><header><b>三频对照</b><span>同一模型与仓位类型；每个频率的比较起止日不同</span></header><div id="frequency-overview-grid"></div></section>
         <section class="position-workbench">
           <header class="workbench-heading"><div><p>POSITION AUDIT</p><h2>仓位与下一期结果</h2></div><strong id="latest-position"></strong></header>
           <section class="diagnostic-band" aria-label="模型与经验精确 Kelly 诊断">

@@ -1,4 +1,4 @@
-const state = { csvText: "", workbookBase64: null, priceSeries: null, strategyId: "KELLY_SIX_MODEL", strategySource: "", strategyFilename: "", result: null, tradePage: 0, tradePageSize: 25 };
+const state = { csvText: "", workbookBase64: null, priceSeries: null, marketSymbols: [], strategyId: "KELLY_SIX_MODEL", strategySource: "", strategyFilename: "", result: null, tradePage: 0, tradePageSize: 25 };
 let kappaTimer = null;
 const $ = (selector) => document.querySelector(selector);
 const runButton = $("#run-button");
@@ -11,11 +11,12 @@ const num = (value, digits=4) => value == null ? "—" : Number(value).toFixed(d
 
 function setSource(text, name, series=null, workbookBase64=null) {
   state.csvText = text || ""; state.priceSeries = series; state.workbookBase64 = workbookBase64;
+  state.marketSymbols = [];
   $("#file-label").textContent = name; updateRunAvailability();
   status.className = "status"; status.textContent = "行情已加载，尚未计算。";
 }
 
-function hasPriceSource() { return Boolean(state.csvText || state.workbookBase64 || state.priceSeries); }
+function hasPriceSource() { return Boolean(state.csvText || state.workbookBase64 || state.priceSeries || state.marketSymbols.length); }
 function updateRunAvailability() {
   runButton.disabled = !hasPriceSource() || (state.strategyId === "uploaded" && !state.strategySource);
 }
@@ -72,7 +73,75 @@ document.querySelectorAll(".source-tabs button").forEach((button) => button.addE
   document.querySelectorAll(".source-tabs button").forEach((item) => item.classList.toggle("active", item === button));
   $("#csv-source").hidden = button.dataset.source !== "csv";
   $("#eodhd-source").hidden = button.dataset.source !== "eodhd";
+  $("#market-source").hidden = button.dataset.source !== "market";
+  if (button.dataset.source === "market") state.marketSymbols = [...$("#market-symbol-select").selectedOptions].map((option) => option.value);
+  else state.marketSymbols = [];
+  updateRunAvailability();
 }));
+
+async function loadMarketOptions() {
+  const select = $("#market-collection-select");
+  const previous = new Set([...select.selectedOptions].map((option) => option.value));
+  const response = await fetch("/api/market-data/catalog");
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || "读取本地清单失败");
+  select.innerHTML = data.collections.map((row) => `<option value="${escapeHtml(row.id)}">${escapeHtml(row.name)} · ${row.member_count} 只</option>`).join("");
+  $("#market-exchange-select").innerHTML = '<option value="">全部交易所</option>' + (data.exchanges || []).map((exchange) => `<option value="${escapeHtml(exchange)}">${escapeHtml(exchange)}</option>`).join("");
+  [...select.options].forEach((option) => { option.selected = previous.has(option.value); });
+  await updateMarketSymbols();
+}
+async function updateMarketSymbols() {
+  const groups = [...$("#market-collection-select").selectedOptions].map((option) => option.value);
+  if (!groups.length) {
+    $("#market-symbol-select").innerHTML = "";
+    $("#market-selection-note").textContent = "选择一个或多个清单后，再筛选并选择代码。";
+    return;
+  }
+  const query = $("#market-symbol-query").value.trim();
+  const exchange = $("#market-exchange-select").value;
+  const params = new URLSearchParams(); groups.forEach((id) => params.append("collection", id));
+  if (query) params.set("q", query);
+  if (exchange) params.set("exchange", exchange);
+  const response = await fetch(`/api/market-data/catalog?${params}`); const data = await response.json();
+  if (!response.ok) throw new Error(data.error || "读取本地代码失败");
+  const select = $("#market-symbol-select");
+  const old = new Set([...select.selectedOptions].map((option) => option.value));
+  select.innerHTML = data.instruments.map((row) => {
+    const market = data.price_status[row.symbol] || {};
+    const present = ["daily","weekly","monthly"].filter((f) => market[f]).length;
+    return `<option value="${escapeHtml(row.symbol)}">${escapeHtml(row.symbol)} · ${escapeHtml(row.name || "")} · 本地 ${present}/3频 · ${escapeHtml(row.validation_status)}</option>`;
+  }).join("");
+  [...select.options].forEach((option) => { option.selected = old.has(option.value); });
+  $("#market-selection-note").textContent = `${data.instruments.length.toLocaleString("zh-CN")} 个代码；选择后按“按当前 κ 计算”启动本地读取，缺失数据会分批补齐。`;
+}
+$("#market-collection-select").addEventListener("change", () => {
+  state.marketSymbols = []; updateRunAvailability();
+  $("#market-symbol-select").innerHTML = "";
+  updateMarketSymbols().catch((e) => { $("#market-selection-note").textContent = e.message; });
+});
+$("#market-exchange-select").addEventListener("change", () => {
+  state.marketSymbols = []; updateRunAvailability();
+  updateMarketSymbols().catch((e) => { $("#market-selection-note").textContent = e.message; });
+});
+$("#market-symbol-query").addEventListener("input", () => {
+  clearTimeout(kappaTimer); kappaTimer = setTimeout(() => updateMarketSymbols().catch((e) => { $("#market-selection-note").textContent = e.message; }), 250);
+});
+$("#market-select-visible").addEventListener("click", () => {
+  [...$("#market-symbol-select").options].forEach((option) => { option.selected = true; });
+  $("#market-symbol-select").dispatchEvent(new Event("change"));
+});
+$("#market-clear-selection").addEventListener("click", () => {
+  [...$("#market-symbol-select").options].forEach((option) => { option.selected = false; });
+  state.marketSymbols = []; updateRunAvailability();
+});
+$("#market-symbol-select").addEventListener("change", () => {
+  state.marketSymbols = [...$("#market-symbol-select").selectedOptions].map((option) => option.value);
+  state.csvText = ""; state.workbookBase64 = null; state.priceSeries = null;
+  $("#file-label").textContent = state.marketSymbols.length ? `本地清单 · ${state.marketSymbols.length} 个代码` : "选择或拖入文件";
+  status.textContent = state.marketSymbols.length ? `已选择 ${state.marketSymbols.length} 个代码；运行前会自动补齐本地缺少的频率。` : "先选择本地清单代码。";
+  updateRunAvailability();
+});
+loadMarketOptions().catch((e) => { $("#market-selection-note").textContent = `本地数据暂不可用：${e.message}`; });
 
 async function readFile(file) {
   if (!file) return;
@@ -139,11 +208,28 @@ runButton.addEventListener("click", async () => {
       payload.strategy_source = state.strategySource;
       payload.strategy_filename = state.strategyFilename;
     }
-    if (state.workbookBase64) payload.workbook_b64 = state.workbookBase64;
+    if (state.marketSymbols.length) payload.symbols = state.marketSymbols;
+    else if (state.workbookBase64) payload.workbook_b64 = state.workbookBase64;
     else if (state.priceSeries) payload.price_series = state.priceSeries;
     else payload.csv_text = state.csvText;
-    const response = await fetch("/api/backtest", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
-    const data = await response.json(); if (!response.ok) throw new Error(data.error || "计算失败");
+    const endpoint = state.marketSymbols.length ? "/api/market-data/backtest" : "/api/backtest";
+    let response = await fetch(endpoint, {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
+    let data = await response.json(); if (!response.ok) throw new Error(data.error || "计算失败");
+    if (data.status === "fetching") {
+      let job;
+      while (true) {
+        await new Promise((resolve) => setTimeout(resolve, 1800));
+        const jobResponse = await fetch(`/api/market-data/jobs/${data.job_id}`);
+        const jobData = await jobResponse.json();
+        if (!jobResponse.ok) throw new Error(jobData.error || "读取补数任务失败");
+        job = jobData.job;
+        status.textContent = `正在补齐 ${data.symbols.length} 个代码的本地日/周/月数据；任务 ${job.completed_items}/${job.total_items}，失败/跳过 ${job.failed_items}。`;
+        if (["completed","completed_with_issues","paused_quota","paused_rate_limit","needs_attention","needs_token","paused"].includes(job.status)) break;
+      }
+      if (job.status !== "completed") throw new Error(`本地补数任务状态：${job.status}。${job.message || "可到行情管理页查看并恢复。"}`);
+      response = await fetch(endpoint, {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
+      data = await response.json(); if (!response.ok) throw new Error(data.error || "本地数据计算失败");
+    }
     state.result = data;
     fillSelect("#symbol-select", [...new Set(data.summaries.map((r) => r.symbol))]);
     fillSelect("#model-select", [...new Set(data.summaries.map((r) => r.model_id))]);
@@ -153,7 +239,7 @@ runButton.addEventListener("click", async () => {
     $("#empty-state").hidden = true; $("#results").hidden = false; render();
     status.textContent = uploaded
       ? `完成 ${data.periods.length.toLocaleString("zh-CN")} 行逐期评价；策略 ${data.strategy.name}。`
-      : `完成 ${data.periods.length.toLocaleString("zh-CN")} 行逐期评价；κ=${data.config.convergence_kappa}。`;
+      : `完成 ${data.periods.length.toLocaleString("zh-CN")} 行逐期评价；κ=${data.config.convergence_kappa}${data.data_source ? `；来源：${data.data_source.source}` : ""}。`;
   } catch (error) { status.className = "status error"; status.textContent = error.message; }
   finally { updateRunAvailability(); runButton.querySelector("span").textContent = uploaded ? "重新运行上传策略" : "按当前 κ 重新计算"; }
 });
@@ -165,6 +251,11 @@ $("#trade-next").addEventListener("click", () => { state.tradePage += 1; renderT
 
 function selected() { return {symbol:$("#symbol-select").value,model:$("#model-select").value,position:$("#position-select").value,frequency:$("#frequency-select").value}; }
 function filtered(collection) { const f=selected(); return collection.filter((r) => r.symbol===f.symbol && r.model_id===f.model && r.position_type===f.position && r.frequency===f.frequency); }
+function evaluationPeriod(rows) {
+  if (!rows.length) return "—";
+  const first = rows[0].signal_date, last = rows[rows.length - 1].return_date;
+  return first && last ? `${first} → ${last}` : "—";
+}
 
 function render() {
   const rows = filtered(state.result.periods); const signals = filtered(state.result.signals);
@@ -172,9 +263,9 @@ function render() {
   $("#metric-cards").innerHTML = summary ? [
     ["方向准确率",pct(summary.direction_accuracy),`${summary.direction_observations} 次有方向判断`],
     ["平均截断对数增长",num(summary.average_truncated_log_growth,6),summary.formal_sample_eligible?"达到正式样本门槛":"仅描述 未达门槛"],
-    ["累计收益",pct(summary.total_return),`买入持有 ${pct(summary.buy_hold_return)}`],
+    ["累计收益",pct(summary.total_return),`买入持有（与当前策略同期） ${pct(summary.buy_hold_return)}`,`比较区间 ${evaluationPeriod(rows)}`],
     ["最大回撤",pct(summary.max_drawdown),`覆盖率 ${pct(summary.coverage)}`],
-  ].map((x) => `<article class="metric-card"><header><b>${x[0]}</b></header><div class="primary-metric"><strong>${x[1]}</strong><small>${x[2]}</small></div></article>`).join("") : "<p>该组合数据不足。</p>";
+  ].map((x) => `<article class="metric-card"><header><b>${x[0]}</b></header><div class="primary-metric"><strong>${x[1]}</strong><small>${x[2]}</small>${x[3]?`<small class="benchmark-period">${x[3]}</small>`:""}</div></article>`).join("") : "<p>该组合数据不足。</p>";
   renderFrequencyOverview(); renderCharts(signals, rows); renderDiagnostics(summary, signals); renderTradeTable(); renderTable(rows);
   const latest = signals[signals.length-1]; $("#latest-position").textContent = latest ? `${latest.evaluation_status === "pending" ? "待验证" : "最新"} ${pct(latest.position_value)}` : "";
   const warnings = state.result.issues; $("#warnings").hidden = !warnings.length; $("#warnings").innerHTML = warnings.map((x) => `<div>${escapeHtml(x)}</div>`).join("");
@@ -205,7 +296,7 @@ function wealthChart(rows) {
 function renderCharts(signals, rows) {
   $("#position-chart").innerHTML=positionChart(signals);$("#change-chart").innerHTML=changeChart(rows);$("#wealth-chart").innerHTML=wealthChart(rows);
   $("#position-caption").textContent=`${signals.length} 个信号`;$("#change-caption").textContent=`${rows.filter((r)=>r.position_change!=null&&Math.abs(r.position_change)>1e-12).length} 笔变化`;
-  const last=rows[rows.length-1];$("#wealth-caption").textContent=last?`策略 ${num(last.cumulative_wealth,3)} · 持有 ${num(last.buy_hold_wealth,3)}`:"";
+  const last=rows[rows.length-1];$("#wealth-caption").textContent=last?`策略 ${num(last.cumulative_wealth,3)} · 持有 ${num(last.buy_hold_wealth,3)} · 同期区间 ${evaluationPeriod(rows)}`:"";
 }
 function renderDiagnostics(summary, signals) {
   const uploaded=state.result?.strategy?.kind==="uploaded";
