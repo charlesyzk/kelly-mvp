@@ -140,7 +140,11 @@ def fetch_eodhd_payload(payload: dict[str, Any]) -> dict[str, Any]:
         except (TypeError, ValueError):
             remaining = 0
         usage_date = str(usage.get("apiRequestsDate", ""))[:10]
-        if usage_date and usage_date != datetime.now(timezone.utc).date().isoformat():
+        current_dates = {
+            datetime.now(timezone.utc).date().isoformat(),
+            date.today().isoformat(),
+        }
+        if usage_date and usage_date not in current_dates:
             remaining = int(usage.get("dailyRateLimit", 0) or 0)
         if remaining < 3:
             raise ValueError("EODHD剩余日额度不足以完成日/周/月三次请求；请到行情管理页查看额度")

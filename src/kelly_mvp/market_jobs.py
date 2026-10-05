@@ -50,8 +50,14 @@ def _quota_remaining(usage: dict[str, object]) -> int | None:
     except (KeyError, TypeError, ValueError):
         return None
     usage_date = str(usage.get("apiRequestsDate", ""))[:10]
-    today = datetime.now(timezone.utc).date().isoformat()
-    if usage_date and usage_date != today:
+    # The provider's daily usage date may follow UTC while the desktop and
+    # mocked account payload follow the user's local date. Treat either date
+    # as current across the UTC/local midnight boundary.
+    current_dates = {
+        datetime.now(timezone.utc).date().isoformat(),
+        date.today().isoformat(),
+    }
+    if usage_date and usage_date not in current_dates:
         spent = 0
     # Do not consume separately purchased extra calls without an explicit UI budget setting.
     return max(0, limit - spent)
