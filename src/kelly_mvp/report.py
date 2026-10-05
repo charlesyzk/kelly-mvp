@@ -70,12 +70,13 @@ def _conclusion_text(result: BacktestResult, comparisons: tuple[ComparisonResult
     supported = [row for row in comparisons if row.supported_at_05]
     exploratory = [row for row in comparisons if row.exploratory_at_10]
     lines = [
-        "六模型动态 Kelly 样本外验证",
+        "Kelly 2.0 六模型动态样本外验证",
         "",
         "研究口径",
         f"窗口：日 {config.windows['daily']}、周 {config.windows['weekly']}、月 {config.windows['monthly']}",
-        "仓位：RAW、BOUNDED、SAFE；不使用 Half Kelly",
-        f"SAFE 参数：kappa={config.convergence_kappa:g}；财富下限={config.wealth_floor:g}",
+        "仓位：RAW、BOUNDED、SAFE；SAFE 使用完整数学定义域，不做杠杆裁剪",
+        f"EWMA 半衰期：日 {config.ewma_half_lives['daily']}、周 {config.ewma_half_lives['weekly']}、月 {config.ewma_half_lives['monthly']}；财富下限={config.wealth_floor:g}",
+        "止损：同时报告 WITH_STOP 与 WITHOUT_STOP；仅使用收盘价，按止损线成交且忽略跳空",
         "交易成本：本阶段不启用",
         "正式判定：5% BH-FDR，同时要求相对 M2 均值为正、相对买入持有 95% CI 下限不低于 0、达到最低样本数",
         "",
@@ -105,6 +106,8 @@ def write_outputs(
     active = config or StrategyConfig()
     target = Path(output_dir)
     target.mkdir(parents=True, exist_ok=True)
+    if any(target.iterdir()):
+        raise ValueError(f"output directory is not empty; choose a new research directory: {target}")
     comparisons = compare_models(result, active)
     summary = target / "summary.csv"
     periods = target / "periods.csv"

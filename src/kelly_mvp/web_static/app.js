@@ -1,5 +1,4 @@
 const state = { csvText: "", workbookBase64: null, priceSeries: null, strategyId: "KELLY_SIX_MODEL", strategySource: "", strategyFilename: "", result: null, tradePage: 0, tradePageSize: 25 };
-let kappaTimer = null;
 const $ = (selector) => document.querySelector(selector);
 const runButton = $("#run-button");
 const status = $("#status");
@@ -22,7 +21,6 @@ function updateRunAvailability() {
 function applyStrategyMode() {
   const uploaded = state.strategyId === "uploaded";
   $("#strategy-upload").hidden = !uploaded;
-  $("#kelly-controls").hidden = uploaded;
   $("#position-rule").querySelector("span").textContent = uploaded ? "上传策略仓位" : "Kelly 内部仓位";
   $("#position-rule").querySelector("strong").textContent = uploaded ? "TARGET" : "RAW · BOUNDED · SAFE";
   $("#strategy-description").textContent = uploaded
@@ -38,7 +36,7 @@ function applyStrategyMode() {
   status.textContent = hasPriceSource()
     ? uploaded && !state.strategySource ? "行情已加载；请再上传策略文件。" : "行情已加载，尚未计算。"
     : uploaded ? "先上传策略并加载行情，再运行验证。" : "先加载行情，再运行六模型验证。";
-  runButton.querySelector("span").textContent = uploaded ? "运行上传策略" : "按当前 κ 计算";
+  runButton.querySelector("span").textContent = uploaded ? "运行上传策略" : "运行 Kelly 2.0";
   updateRunAvailability();
 }
 strategySelect.addEventListener("change", () => {
@@ -118,23 +116,11 @@ $("#eodhd-fetch").addEventListener("click", async (event) => {
   finally { button.disabled = false; }
 });
 
-function setKappa(value) {
-  $("#kappa").value = value; $("#kappa-value").textContent = Number(value).toFixed(2);
-  document.querySelectorAll("[data-kappa]").forEach((b) => b.classList.toggle("active", Number(b.dataset.kappa) === Number(value)));
-  if (state.result && state.strategyId === "KELLY_SIX_MODEL") {
-    status.textContent = "κ 已改变，正在准备自动重算…";
-    clearTimeout(kappaTimer);
-    kappaTimer = setTimeout(() => runButton.click(), 450);
-  }
-}
-$("#kappa").addEventListener("input", (event) => setKappa(event.target.value));
-document.querySelectorAll("[data-kappa]").forEach((button) => button.addEventListener("click", () => setKappa(button.dataset.kappa)));
-
 runButton.addEventListener("click", async () => {
   const uploaded = state.strategyId === "uploaded";
   runButton.disabled = true; status.className = "status"; status.textContent = uploaded ? "正在运行上传策略…" : "正在运行六模型与三类仓位…";
   try {
-    const payload = {strategy_id:state.strategyId, convergence_kappa:Number($("#kappa").value)};
+    const payload = {strategy_id:state.strategyId};
     if (uploaded) {
       payload.strategy_source = state.strategySource;
       payload.strategy_filename = state.strategyFilename;
@@ -148,23 +134,23 @@ runButton.addEventListener("click", async () => {
     fillSelect("#symbol-select", [...new Set(data.summaries.map((r) => r.symbol))]);
     fillSelect("#model-select", [...new Set(data.summaries.map((r) => r.model_id))]);
     fillSelect("#position-select", [...new Set(data.summaries.map((r) => r.position_type))]);
-    if (!uploaded) { $("#model-select").value = "M4_SIMPLE"; $("#position-select").value = "SAFE"; }
+    if (!uploaded) { $("#model-select").value = "M4_LOG_ZERO"; $("#position-select").value = "SAFE"; }
     $("#download-statistics").hidden = uploaded;
     $("#empty-state").hidden = true; $("#results").hidden = false; render();
     status.textContent = uploaded
       ? `完成 ${data.periods.length.toLocaleString("zh-CN")} 行逐期评价；策略 ${data.strategy.name}。`
-      : `完成 ${data.periods.length.toLocaleString("zh-CN")} 行逐期评价；κ=${data.config.convergence_kappa}。`;
+      : `完成 ${data.periods.length.toLocaleString("zh-CN")} 行逐期评价；包含止损和无止损两条路径。`;
   } catch (error) { status.className = "status error"; status.textContent = error.message; }
-  finally { updateRunAvailability(); runButton.querySelector("span").textContent = uploaded ? "重新运行上传策略" : "按当前 κ 重新计算"; }
+  finally { updateRunAvailability(); runButton.querySelector("span").textContent = uploaded ? "重新运行上传策略" : "重新运行 Kelly 2.0"; }
 });
 
 function fillSelect(selector, values) { $(selector).innerHTML = values.map((v) => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join(""); }
-["#symbol-select","#model-select","#position-select","#frequency-select"].forEach((selector) => $(selector).addEventListener("change", () => { state.tradePage = 0; render(); }));
+["#symbol-select","#model-select","#position-select","#frequency-select","#stop-select"].forEach((selector) => $(selector).addEventListener("change", () => { state.tradePage = 0; render(); }));
 $("#trade-prev").addEventListener("click", () => { state.tradePage -= 1; renderTradeTable(); });
 $("#trade-next").addEventListener("click", () => { state.tradePage += 1; renderTradeTable(); });
 
-function selected() { return {symbol:$("#symbol-select").value,model:$("#model-select").value,position:$("#position-select").value,frequency:$("#frequency-select").value}; }
-function filtered(collection) { const f=selected(); return collection.filter((r) => r.symbol===f.symbol && r.model_id===f.model && r.position_type===f.position && r.frequency===f.frequency); }
+function selected() { return {symbol:$("#symbol-select").value,model:$("#model-select").value,position:$("#position-select").value,frequency:$("#frequency-select").value,stop:$("#stop-select").value}; }
+function filtered(collection) { const f=selected(); return collection.filter((r) => r.symbol===f.symbol && r.model_id===f.model && r.position_type===f.position && r.frequency===f.frequency && (r.stop_variant||"WITHOUT_STOP")===f.stop); }
 
 function render() {
   const rows = filtered(state.result.periods); const signals = filtered(state.result.signals);
@@ -177,7 +163,10 @@ function render() {
   ].map((x) => `<article class="metric-card"><header><b>${x[0]}</b></header><div class="primary-metric"><strong>${x[1]}</strong><small>${x[2]}</small></div></article>`).join("") : "<p>该组合数据不足。</p>";
   renderFrequencyOverview(); renderCharts(signals, rows); renderDiagnostics(summary, signals); renderTradeTable(); renderTable(rows);
   const latest = signals[signals.length-1]; $("#latest-position").textContent = latest ? `${latest.evaluation_status === "pending" ? "待验证" : "最新"} ${pct(latest.position_value)}` : "";
-  const warnings = state.result.issues; $("#warnings").hidden = !warnings.length; $("#warnings").innerHTML = warnings.map((x) => `<div>${escapeHtml(x)}</div>`).join("");
+  const warnings = [...state.result.issues];
+  const anomalyCount = rows.filter((row) => row.contains_suspected_adjustment_anomaly).length;
+  if (anomalyCount) warnings.push(`当前筛选下有 ${anomalyCount} 个逐期窗口包含疑似价格异常。标记只提示核对；数据仍参与计算。`);
+  $("#warnings").hidden = !warnings.length; $("#warnings").innerHTML = warnings.map((x) => `<div>${escapeHtml(x)}</div>`).join("");
 }
 
 function dateLabels(rows,width,left,right,y) {

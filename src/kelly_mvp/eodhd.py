@@ -126,7 +126,32 @@ def fetch_prices(
         if observed in seen:
             raise ValueError(f"EODHD返回重复日期：{observed.isoformat()}")
         seen.add(observed)
-        rows.append(PriceRow(observed, normalized_symbol, adjusted_close))
+        ohlc = {name: item.get(name) for name in ("open", "high", "low", "close")}
+        kwargs: dict[str, object] = {}
+        if all(value is not None for value in ohlc.values()):
+            try:
+                raw_open, raw_high, raw_low, raw_close = (float(ohlc[name]) for name in ("open", "high", "low", "close"))
+                volume = float(item["volume"]) if item.get("volume") is not None else None
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"EODHD第{index}条原始OHLCV格式错误") from exc
+            if not all(isfinite(value) and value > 0 for value in (raw_open, raw_high, raw_low, raw_close)):
+                raise ValueError(f"EODHD第{index}条原始OHLC必须有限且大于零")
+            if not raw_low <= min(raw_open, raw_close) <= max(raw_open, raw_close) <= raw_high:
+                raise ValueError(f"EODHD第{index}条原始OHLC顺序异常")
+            factor = adjusted_close / raw_close
+            kwargs = {
+                "adjusted_open": raw_open * factor,
+                "adjusted_high": raw_high * factor,
+                "adjusted_low": raw_low * factor,
+                "raw_open": raw_open,
+                "raw_high": raw_high,
+                "raw_low": raw_low,
+                "raw_close": raw_close,
+                "volume": volume,
+                "trading_status": item.get("trading_status") or item.get("status"),
+                "adjustment_factor": factor,
+            }
+        rows.append(PriceRow(observed, normalized_symbol, adjusted_close, **kwargs))
     return sorted(rows, key=lambda row: row.date)
 
 

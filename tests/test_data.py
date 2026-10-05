@@ -5,7 +5,7 @@ from tempfile import TemporaryDirectory
 
 from openpyxl import Workbook
 
-from kelly_mvp.data import PriceRow, aggregate_prices, daily_prices_to_csv, load_price_workbook, parse_daily_prices
+from kelly_mvp.data import PriceRow, aggregate_prices, daily_prices_to_csv, load_price_workbook, parse_daily_prices, suspected_adjustment_anomalies
 
 
 class DataTests(unittest.TestCase):
@@ -25,6 +25,14 @@ class DataTests(unittest.TestCase):
         ]
         weekly = aggregate_prices(rows, "weekly")
         self.assertEqual([row.date for row in weekly], [date(2026, 8, 28)])
+
+    def test_suspected_adjustment_anomaly_uses_only_prior_returns(self):
+        start = date(2026, 1, 1)
+        closes = [100.0]
+        for value in (0.01, 0.01, 0.01, 0.40):
+            closes.append(closes[-1] * (1 + value))
+        rows = [PriceRow(start + timedelta(days=index), "X", close) for index, close in enumerate(closes)]
+        self.assertEqual(suspected_adjustment_anomalies(rows, lookback=3), frozenset({("X", start + timedelta(days=4))}))
 
     def test_excel_keeps_provider_frequencies_separate(self):
         with TemporaryDirectory() as directory:

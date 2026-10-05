@@ -34,10 +34,6 @@ MAX_REQUEST_BYTES = 35 * 1024 * 1024
 
 
 def calculate_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    try:
-        kappa = float(payload.get("convergence_kappa", 0.8))
-    except (TypeError, ValueError) as exc:
-        raise ValueError("κ 必须是 0 与 1 之间的数字") from exc
     workbook_b64 = payload.get("workbook_b64")
     series = payload.get("price_series")
     if isinstance(workbook_b64, str):
@@ -59,7 +55,7 @@ def calculate_payload(payload: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(csv_text, str):
             raise ValueError("没有收到 CSV 文件内容")
         prices = parse_daily_prices(csv_text)
-    config = StrategyConfig(convergence_kappa=kappa)
+    config = StrategyConfig()
     strategy_id = payload.get("strategy_id", KELLY_STRATEGY_ID)
     if strategy_id == "uploaded":
         source = payload.get("strategy_source")
@@ -82,8 +78,8 @@ def calculate_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "config": {
             "windows": config.windows,
             "bounds": [config.lower_bound, config.upper_bound],
-            "convergence_kappa": config.convergence_kappa,
             "wealth_floor": config.wealth_floor,
+            "ewma_half_lives": config.ewma_half_lives,
         },
         "summaries": [asdict(row) for row in result.summaries],
         "periods": [asdict(row) for row in result.periods],

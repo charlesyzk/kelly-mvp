@@ -2,6 +2,16 @@
 
 from .contract import StrategyContext, StrategyDecision, StrategyDefinition
 from .kelly import BUILTIN_STRATEGIES, BUILTIN_STRATEGY_IDS, KELLY_STRATEGY_ID
+from .ewma_return_position import (
+    EWMAReturnPositionConfig,
+    analyze_ewma_state_events,
+    compute_ewma_rank_features,
+    mark_state_events,
+)
+from .opening_gap_filter import (
+    OpeningGapFilterConfig,
+    compute_opening_gap_filter,
+)
 from .loader import load_user_strategy
 
 
@@ -20,6 +30,12 @@ __all__ = [
     "BUILTIN_STRATEGIES",
     "BUILTIN_STRATEGY_IDS",
     "KELLY_STRATEGY_ID",
+    "EWMAReturnPositionConfig",
+    "analyze_ewma_state_events",
+    "compute_ewma_rank_features",
+    "mark_state_events",
+    "OpeningGapFilterConfig",
+    "compute_opening_gap_filter",
     "StrategyContext",
     "StrategyDecision",
     "StrategyDefinition",

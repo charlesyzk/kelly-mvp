@@ -7,8 +7,9 @@ import csv
 import io
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
-from math import isfinite
+from math import inf, isfinite
 from pathlib import Path
+from statistics import median
 from typing import Iterable
 from zipfile import BadZipFile
 
@@ -23,6 +24,16 @@ class PriceRow:
     date: date
     symbol: str
     adjusted_close: float
+    adjusted_open: float | None = None
+    adjusted_high: float | None = None
+    adjusted_low: float | None = None
+    raw_open: float | None = None
+    raw_high: float | None = None
+    raw_low: float | None = None
+    raw_close: float | None = None
+    volume: float | None = None
+    trading_status: str | None = None
+    adjustment_factor: float | None = None
 
 
 def _parse_rows(handle: Iterable[str]) -> list[PriceRow]:
@@ -30,6 +41,10 @@ def _parse_rows(handle: Iterable[str]) -> list[PriceRow]:
     seen: set[tuple[str, date]] = set()
     reader = csv.DictReader(handle)
     required = {"date", "symbol", "adjusted_close"}
+    optional_ohlc = {"open", "high", "low", "close"}
+    supplied_ohlc = optional_ohlc.intersection(reader.fieldnames or ())
+    if supplied_ohlc and supplied_ohlc != optional_ohlc:
+        raise ValueError("OHLC input must include open, high, low and close together")
     missing = required.difference(reader.fieldnames or ())
     if missing:
         raise ValueError(f"input CSV is missing columns: {sorted(missing)}")
@@ -48,7 +63,31 @@ def _parse_rows(handle: Iterable[str]) -> list[PriceRow]:
         if key in seen:
             raise ValueError(f"duplicate symbol/date at line {line_number}: {symbol} {observed}")
         seen.add(key)
-        rows.append(PriceRow(observed, symbol, close))
+        kwargs: dict[str, object] = {}
+        if supplied_ohlc:
+            try:
+                raw_open, raw_high, raw_low, raw_close = (float(raw[name]) for name in ("open", "high", "low", "close"))
+                volume = float(raw["volume"]) if raw.get("volume", "").strip() else None
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"invalid OHLCV at line {line_number}") from exc
+            if not all(isfinite(value) and value > 0 for value in (raw_open, raw_high, raw_low, raw_close)):
+                raise ValueError(f"OHLC prices must be finite and positive at line {line_number}")
+            if not raw_low <= min(raw_open, raw_close) <= max(raw_open, raw_close) <= raw_high:
+                raise ValueError(f"OHLC ordering is invalid at line {line_number}")
+            factor = close / raw_close
+            kwargs = {
+                "adjusted_open": raw_open * factor,
+                "adjusted_high": raw_high * factor,
+                "adjusted_low": raw_low * factor,
+                "raw_open": raw_open,
+                "raw_high": raw_high,
+                "raw_low": raw_low,
+                "raw_close": raw_close,
+                "volume": volume,
+                "trading_status": raw.get("trading_status") or raw.get("status") or None,
+                "adjustment_factor": factor,
+            }
+        rows.append(PriceRow(observed, symbol, close, **kwargs))
     if not rows:
         raise ValueError("input CSV contains no data rows")
     return sorted(rows, key=lambda row: (row.symbol, row.date))
@@ -137,15 +176,22 @@ def load_price_workbook(path: str | Path) -> dict[str, list[PriceRow]]:
 def daily_prices_to_csv(rows: Iterable[PriceRow]) -> str:
     """Serialize normalized prices using the project's public CSV contract."""
 
+    ordered = tuple(rows)
+    if not ordered:
+        raise ValueError("cannot serialize an empty price series")
+    has_ohlc = all(row.raw_close is not None for row in ordered)
     output = io.StringIO(newline="")
     writer = csv.writer(output, lineterminator="\n")
-    writer.writerow(("date", "symbol", "adjusted_close"))
-    count = 0
-    for row in rows:
-        writer.writerow((row.date.isoformat(), row.symbol, format(row.adjusted_close, ".15g")))
-        count += 1
-    if count == 0:
-        raise ValueError("cannot serialize an empty price series")
+    if has_ohlc:
+        writer.writerow(("date", "symbol", "adjusted_close", "open", "high", "low", "close", "volume", "trading_status"))
+        for row in ordered:
+            writer.writerow((row.date.isoformat(), row.symbol, format(row.adjusted_close, ".15g"),
+                *["" if value is None else format(value, ".15g") for value in (row.raw_open, row.raw_high, row.raw_low, row.raw_close, row.volume)],
+                row.trading_status or ""))
+    else:
+        writer.writerow(("date", "symbol", "adjusted_close"))
+        for row in ordered:
+            writer.writerow((row.date.isoformat(), row.symbol, format(row.adjusted_close, ".15g")))
     return output.getvalue()
 
 
@@ -191,3 +237,29 @@ def split_by_symbol(rows: Iterable[PriceRow]) -> dict[str, list[PriceRow]]:
     for row in rows:
         result.setdefault(row.symbol, []).append(row)
     return result
+
+
+def suspected_adjustment_anomalies(
+    rows: Iterable[PriceRow], *, lookback: int = 252,
+) -> frozenset[tuple[str, date]]:
+    """Flag large simple returns using only the preceding `lookback` returns.
+
+    A full trailing reference window is required. The flag prompts data review;
+    it is neither proof of a bad adjustment nor a deletion rule.
+    """
+    if lookback < 1:
+        raise ValueError("lookback must be positive")
+    flagged: set[tuple[str, date]] = set()
+    for symbol, prices in split_by_symbol(rows).items():
+        ordered = sorted(prices, key=lambda row: row.date)
+        returns = [ordered[i].adjusted_close / ordered[i - 1].adjusted_close - 1.0 for i in range(1, len(ordered))]
+        for return_index, current in enumerate(returns):
+            prior = returns[max(0, return_index - lookback):return_index]
+            if len(prior) != lookback or abs(current) <= 0.30:
+                continue
+            center = median(prior)
+            mad = median(abs(value - center) for value in prior)
+            robust_z = abs(current - center) / (1.4826 * mad) if mad else (inf if current != center else 0.0)
+            if robust_z > 10:
+                flagged.add((symbol, ordered[return_index + 1].date))
+    return frozenset(flagged)

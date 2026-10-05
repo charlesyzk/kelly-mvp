@@ -13,7 +13,7 @@ BUILTIN_STRATEGIES = {
         version="2.0",
         description="完整运行六个 Kelly 模型及 RAW、BOUNDED、SAFE 三类独立仓位。",
         kind="builtin_kelly_suite",
-        supports_kappa=True,
+        supports_kappa=False,
         decide=None,
     )
 }

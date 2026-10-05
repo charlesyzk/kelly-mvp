@@ -27,6 +27,8 @@ class ReportTests(unittest.TestCase):
             self.assertIn("5% 正式支持", paths[6].read_text(encoding="utf-8"))
             self.assertIn("position_type", paths[2].read_text(encoding="utf-8-sig"))
             self.assertIn("action", paths[3].read_text(encoding="utf-8-sig"))
+            with self.assertRaisesRegex(ValueError, "not empty"):
+                write_outputs(result, directory, config)
 
     def test_uploaded_strategy_report_marks_kelly_statistics_not_applicable(self):
         rows = [PriceRow(date(2020,1,1)+timedelta(days=i), "X", 100+i) for i in range(12)]

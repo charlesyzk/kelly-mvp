@@ -8,16 +8,15 @@ from kelly_mvp.web import STATIC_DIR, calculate_payload, fetch_eodhd_payload, st
 
 
 class WebTests(unittest.TestCase):
-    def test_interface_exposes_kappa_and_three_positions(self):
+    def test_interface_exposes_kelly_2_0_paths_and_three_positions(self):
         html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
-        self.assertIn("收敛安全比例 κ", html)
         self.assertIn("RAW · BOUNDED · SAFE", html)
-        self.assertIn("系统不会寻找历史收益最高的 κ", html)
+        self.assertIn("止损路径", html)
         self.assertIn("EODHD 三频", html)
         self.assertIn(".xlsx", html)
         script = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
         self.assertIn("workbook_b64", script)
-        self.assertIn("正在准备自动重算", script)
+        self.assertNotIn("convergence_kappa", script)
         self.assertIn("模拟逐笔买卖操作", html)
         self.assertIn("下载调仓流水 CSV", html)
         self.assertIn("策略净值 / 买入持有", html)
@@ -25,7 +24,7 @@ class WebTests(unittest.TestCase):
         self.assertIn("上传 Python 策略", html)
         self.assertIn("/strategy-template.py", html)
         self.assertIn("一个目标仓位，同一套验证链路", script)
-        self.assertNotIn("kelly-fraction-field", script)
+        self.assertIn("运行 Kelly 2.0", script)
 
     @patch("kelly_mvp.web.fetch_price_bundle")
     def test_eodhd_payload_keeps_provider_frequencies(self, fetch):
@@ -35,9 +34,9 @@ class WebTests(unittest.TestCase):
         self.assertEqual(set(result["price_series"]), {"daily","weekly","monthly"})
         self.assertEqual(parse_daily_prices(result["price_series"]["weekly"])[-1].adjusted_close, 11)
 
-    def test_demo_payload_runs_six_models_and_three_positions(self):
-        result = calculate_payload({"csv_text":generate_demo_csv(),"convergence_kappa":0.8})
-        self.assertEqual({row["model_id"] for row in result["summaries"]}, {"M2_LOG","M3_LOG","M4_LOG_ZERO","M4_SIMPLE","M4_LOG_MEAN","EMPIRICAL_EXACT"})
+    def test_demo_payload_runs_kelly_2_0_models_and_three_positions(self):
+        result = calculate_payload({"csv_text":generate_demo_csv()})
+        self.assertEqual({row["model_id"] for row in result["summaries"]}, {"M2_LOG","M4_LOG_ZERO","EMPIRICAL_EXACT","EWMA_M2_LOG","EWMA_M4_LOG_ZERO","EWMA_EMPIRICAL_EXACT"})
         self.assertEqual({row["position_type"] for row in result["summaries"]}, {"RAW","BOUNDED","SAFE"})
         self.assertTrue(result["statistics"])
         self.assertTrue(result["trades"])

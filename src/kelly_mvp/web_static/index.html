@@ -54,18 +54,9 @@
         <p id="eodhd-config-status" class="api-note">正在检查服务端 Token…</p>
       </section>
 
-      <section id="kelly-controls" class="kappa-control" aria-labelledby="kappa-title">
-        <div><span id="kappa-title">收敛安全比例 κ</span><strong id="kappa-value">0.80</strong></div>
-        <input id="kappa" type="range" min="0.10" max="0.99" step="0.01" value="0.80">
-        <div class="kappa-presets">
-          <button type="button" data-kappa="0.50">严格 0.50</button>
-          <button type="button" data-kappa="0.80" class="active">基准 0.80</button>
-          <button type="button" data-kappa="0.95">宽松 0.95</button>
-        </div>
-        <small>按钮只改变预先声明的数学安全域；系统不会寻找历史收益最高的 κ。</small>
-      </section>
+      <section class="fixed-rule"><span>EWMA 半衰期</span><strong>日 84 · 周 35 · 月 20</strong></section>
       <div id="position-rule" class="fixed-rule"><span>Kelly 内部仓位</span><strong>RAW · BOUNDED · SAFE</strong></div>
-      <button class="run-button" id="run-button" type="button" disabled><span>按当前 κ 计算</span><b>→</b></button>
+      <button class="run-button" id="run-button" type="button" disabled><span>运行 Kelly 2.0</span><b>→</b></button>
       <p class="status" id="status" role="status">先加载行情，再运行六模型验证。</p>
     </aside>
 
@@ -75,7 +66,7 @@
         <p id="logic-caption" class="logic-caption">RAW 看模型原始倾向 · BOUNDED 限制敞口 · SAFE 再限制 Taylor 收敛域</p>
       </section>
       <section id="empty-state" class="empty-state">
-        <div class="empty-orbit"><span>M2</span><span>M3</span><span>M4</span><span>EX</span><b>f</b></div>
+        <div class="empty-orbit"><span>M2</span><span>EWMA</span><span>M4</span><span>EX</span><b>f</b></div>
         <h2>结果会在这里展开</h2><p id="empty-copy">加载行情后，选择模型、仓位类型和频率查看真实逐期计算。</p>
       </section>
       <section id="results" class="results" hidden>
@@ -84,6 +75,7 @@
           <label>模型<select id="model-select"></select></label>
           <label>仓位<select id="position-select"><option>SAFE</option><option>BOUNDED</option><option>RAW</option></select></label>
           <label>频率<select id="frequency-select"><option value="daily">日频</option><option value="weekly">周频</option><option value="monthly">月频</option></select></label>
+          <label>止损路径<select id="stop-select"><option value="WITHOUT_STOP">无止损</option><option value="WITH_STOP">收盘移动止损</option></select></label>
         </div>
         <div id="metric-cards" class="metric-cards"></div>
         <section class="frequency-overview"><header><b>三频对照</b><span>同一模型与仓位类型</span></header><div id="frequency-overview-grid"></div></section>
@@ -122,10 +114,10 @@
         <div class="method-grid">
           <article><em>1</em><h3>直接使用分频数据</h3><p>EODHD 分别请求日、周、月；Excel 分别读取 daily、weekly、monthly 工作表。</p></article>
           <article><em>2</em><h3>滚动窗口</h3><p>日 252、周 104、月 60 个完整有效收益，只使用信号日已经可获得的数据。</p></article>
-          <article><em>3</em><h3>六模型</h3><p>M2_LOG 是基准；另外五个模型作为正式候选，同时与 M2 和买入持有比较。</p></article>
+          <article><em>3</em><h3>六模型</h3><p>M2_LOG、M4_LOG_ZERO、EMPIRICAL_EXACT 及其 EWMA 加权版本。</p></article>
           <article><em>4</em><h3>三类仓位</h3><p>RAW、BOUNDED、SAFE 分别重新求解，互不回退，也不做 Half Kelly 缩放。</p></article>
-          <article><em>5</em><h3>κ 的作用</h3><p>κ 越小，Taylor 收敛安全域通常越严格。它不是根据回测收益自动选择的参数。</p></article>
-          <article><em>6</em><h3>正式证据</h3><p>使用循环移动区块 Bootstrap 和固定 18 组的 BH-FDR；方向准确率只作描述。</p></article>
+          <article><em>5</em><h3>止损双路径</h3><p>同时报告有止损与无止损；止损只按调整后收盘价检查，不推测日内价格路径。</p></article>
+          <article><em>6</em><h3>正式证据</h3><p>使用循环移动区块 Bootstrap 和分组 BH-FDR；方向准确率只作描述。</p></article>
         </div>
       </details>
     </section>

@@ -2,6 +2,7 @@ import unittest
 from datetime import date, timedelta
 
 from kelly_mvp import PriceRow, StrategyConfig, classify_trade, load_user_strategy, run_backtest
+from kelly_mvp.backtest import _apply_close_stop
 
 
 def prices(count=90, growth=1.001):
@@ -30,10 +31,10 @@ class BacktestTests(unittest.TestCase):
             bootstrap_repetitions=20,
         )
 
-    def test_generates_six_models_and_three_positions(self):
+    def test_generates_kelly_2_0_models_and_three_positions(self):
         result = run_backtest(prices(), self.config())
         daily = [row for row in result.periods if row.frequency == "daily"]
-        self.assertEqual({row.model_id for row in daily}, {"M2_LOG","M3_LOG","M4_LOG_ZERO","M4_SIMPLE","M4_LOG_MEAN","EMPIRICAL_EXACT"})
+        self.assertEqual({row.model_id for row in daily}, {"M2_LOG","M4_LOG_ZERO","EMPIRICAL_EXACT","EWMA_M2_LOG","EWMA_M4_LOG_ZERO","EWMA_EMPIRICAL_EXACT"})
         self.assertEqual({row.position_type for row in daily}, {"RAW","BOUNDED","SAFE"})
         first = daily[0]
         self.assertEqual(first.signal_date, date(2020, 1, 6))
@@ -46,16 +47,32 @@ class BacktestTests(unittest.TestCase):
         direct_prices = {frequency: prices() for frequency in ("daily", "weekly", "monthly")}
         result = run_backtest(direct_prices, self.config())
         pending = [row for row in result.signals if row.evaluation_status == "pending"]
-        self.assertEqual(len(pending), 6 * 3 * 3)
+        self.assertEqual(len(pending), 6 * 3 * 3 * 2)
+        self.assertEqual({row.stop_variant for row in pending}, {"WITHOUT_STOP", "WITH_STOP"})
         self.assertTrue(any(row.evaluation_status == "pending" for row in result.trades))
 
-    def test_zero_return_is_unsuccessful_for_nonzero_position(self):
+    def test_zero_return_is_neutral_for_direction_hit_rate(self):
         rows = prices(12)
         rows[-1] = PriceRow(rows[-1].date, "X", rows[-2].adjusted_close)
         result = run_backtest(rows, self.config())
         candidates = [row for row in result.periods if row.frequency == "daily" and row.return_date == rows[-1].date and row.position_value not in (None, 0)]
         self.assertTrue(candidates)
-        self.assertTrue(all(row.direction_success is False for row in candidates))
+        self.assertTrue(all(row.direction_success is None for row in candidates))
+
+    def test_close_stop_checks_old_line_before_trailing(self):
+        path = [(date(2024, 1, 2), 101.0), (date(2024, 1, 3), 98.0)]
+        realized, state, triggered, blocked = _apply_close_stop(100.0, path, 1.0, None, 0.01, 2.5, 1.5)
+        self.assertTrue(triggered)
+        self.assertFalse(blocked)
+        self.assertIsNotNone(state)
+        self.assertFalse(state.active)
+        self.assertAlmostEqual(realized, 101.0 * __import__("math").exp(-0.025) / 100.0 - 1.0)
+
+    def test_backtest_emits_isolated_stop_variants(self):
+        result = run_backtest(prices(), self.config())
+        self.assertEqual({row.stop_variant for row in result.periods}, {"WITHOUT_STOP", "WITH_STOP"})
+        keys = {(row.symbol, row.frequency, row.model_id, row.position_type, row.stop_variant) for row in result.summaries}
+        self.assertEqual(len(keys), len(result.summaries))
 
     def test_bankruptcy_receives_wealth_floor_penalty(self):
         rows = [PriceRow(date(2020,1,1)+timedelta(days=i), "X", 100*(0.99**i)) for i in range(8)]
