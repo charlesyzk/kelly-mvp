@@ -30,7 +30,7 @@ class StrategyModuleTests(unittest.TestCase):
         self.assertEqual(BUILTIN_STRATEGY_IDS, ("KELLY_SIX_MODEL",))
         strategy = get_builtin_strategy(KELLY_STRATEGY_ID)
         self.assertEqual(strategy.kind, "builtin_kelly_suite")
-        self.assertTrue(strategy.supports_kappa)
+        self.assertFalse(strategy.supports_kappa)
         self.assertIsNone(strategy.decide)
         self.assertEqual([row["id"] for row in strategy_catalog()], [KELLY_STRATEGY_ID])
 

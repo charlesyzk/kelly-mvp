@@ -9,11 +9,11 @@ from math import isfinite
 FREQUENCIES = ("daily", "weekly", "monthly")
 MODEL_IDS = (
     "M2_LOG",
-    "M3_LOG",
     "M4_LOG_ZERO",
-    "M4_SIMPLE",
-    "M4_LOG_MEAN",
     "EMPIRICAL_EXACT",
+    "EWMA_M2_LOG",
+    "EWMA_M4_LOG_ZERO",
+    "EWMA_EMPIRICAL_EXACT",
 )
 POSITION_TYPES = ("RAW", "BOUNDED", "SAFE")
 
@@ -28,7 +28,6 @@ class StrategyConfig:
     )
     lower_bound: float = -1.0
     upper_bound: float = 1.0
-    convergence_kappa: float = 0.8
     wealth_floor: float = 1e-12
     bootstrap_repetitions: int = 2000
     bootstrap_seed: int = 20260904
@@ -38,12 +37,21 @@ class StrategyConfig:
     formal_fdr: float = 0.05
     exploratory_fdr: float = 0.10
     transaction_cost_bps: float = 0.0
+    ewma_half_lives: dict[str, int] = field(
+        default_factory=lambda: {"daily": 84, "weekly": 35, "monthly": 20}
+    )
+    stop_enabled: bool = False
+    long_stop_k: float = 2.5
+    short_stop_k: float = 1.5
+    stop_fill_mode: str = "stop_price"
+    stop_monitor_price: str = "adjusted_close"
 
     def __post_init__(self) -> None:
         for name, mapping in (
             ("windows", self.windows),
             ("minimum_matches", self.minimum_matches),
             ("bootstrap_blocks", self.bootstrap_blocks),
+            ("ewma_half_lives", self.ewma_half_lives),
         ):
             if set(mapping) != set(FREQUENCIES):
                 raise ValueError(f"{name} must define exactly {FREQUENCIES}")
@@ -52,7 +60,6 @@ class StrategyConfig:
         numeric = (
             self.lower_bound,
             self.upper_bound,
-            self.convergence_kappa,
             self.wealth_floor,
             self.formal_fdr,
             self.exploratory_fdr,
@@ -62,8 +69,6 @@ class StrategyConfig:
             raise ValueError("configuration values must be finite")
         if self.lower_bound >= self.upper_bound:
             raise ValueError("lower_bound must be less than upper_bound")
-        if not 0 < self.convergence_kappa < 1:
-            raise ValueError("convergence_kappa must be strictly between 0 and 1")
         if not 0 < self.wealth_floor < 1:
             raise ValueError("wealth_floor must be strictly between 0 and 1")
         if isinstance(self.bootstrap_repetitions, bool) or self.bootstrap_repetitions < 1:
@@ -74,3 +79,9 @@ class StrategyConfig:
             raise ValueError("FDR levels must satisfy 0 < formal <= exploratory < 1")
         if self.transaction_cost_bps != 0:
             raise ValueError("the frozen study does not enable transaction costs")
+        if not isfinite(self.long_stop_k) or self.long_stop_k <= 0:
+            raise ValueError("long_stop_k must be positive and finite")
+        if not isfinite(self.short_stop_k) or self.short_stop_k <= 0:
+            raise ValueError("short_stop_k must be positive and finite")
+        if self.stop_fill_mode != "stop_price" or self.stop_monitor_price != "adjusted_close":
+            raise ValueError("2.0 supports close-monitored stop-price fills only")

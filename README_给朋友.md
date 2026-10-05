@@ -1,108 +1,48 @@
-# 给朋友的高阶矩动态 Kelly 使用说明
+# 策略研究工具使用说明
 
-这个项目可以切换策略做统一验证。默认的 Kelly 策略会逐期计算六个内部模型；你也可以下载模板、上传自己的 Python 策略。两种模式都只用当时已经看到的数据，再用下一期真实收益评价。它不会自动交易，也不承诺盈利。
+这个项目用于比较策略想法，不会自动交易，也不保证赚钱。现在有三块：Kelly 2.0 六模型、EWMA 收益状态研究、上传可信 Python 策略。
 
-## 先选择策略
+## Kelly 2.0
 
-- 选择“Kelly 六模型策略”时，页面内部可以继续切换六个模型和 `RAW / BOUNDED / SAFE`。
-- 选择“上传 Python 策略”时，先下载模板并实现 `decide(context)`，再上传 `.py` 文件。上传策略只产生一个 `TARGET` 目标仓位，不套用 Kelly 的模型统计。
-- 上传策略与 Kelly 使用相同的行情入口、日周月窗口、pending、净值和模拟调仓流水。当前是内部可信代码工具，不要上传来源不明的 Python 文件。
+Kelly 模块内部运行六个模型：`M2_LOG`、`M4_LOG_ZERO`、`EMPIRICAL_EXACT`，以及各自的 EWMA 加权版本。每个模型分别计算 `RAW / BOUNDED / SAFE` 仓位，并提供有止损和无止损两条研究路径。SAFE 不再需要 κ。
 
-## 安装与启动
+数据按日、周、月分别计算，窗口是 252/104/60 个收益。没有下一期行情的最新信号会标成 pending，不会提前算收益。出现非有限最优解时，系统会显示沿用的旧仓位或缺失状态，不会悄悄填一个默认数。
 
-需要 Python 3.11 或更高版本。
+止损使用调整后收盘价检查，按前一日的止损价假设成交；周/月止损需要日线。当前没有模拟跳空、成本、滑点、融资融券或真实成交，因此止损结果是理想化研究值。
+
+## EWMA 状态研究
+
+EWMA 研究模块把收益按历史波动率标准化，再与严格过去的历史分布比较，划分五种状态并标记首次进入和冷却期。它会整理固定期限后续收益、MFE/MAE 和尾部 CVaR，帮助检查不同状态后市场表现是否不同。
+
+排名只衡量当前收益在历史中的位置，不等于上涨/下跌预测。当前模块还没有次日开盘入场、A/B/C 退出、T+1、账户审批和组合资金分配的完整执行模拟，所以输出是条件统计研究，不是已经可以照着买卖的策略。
+
+集合竞价 TXT 中有一条可拆出的单股过滤因子：统计过去 30 个已结束交易日里“复权开盘高于前一日复权收盘”的次数，默认至少 10 次标记为符合条件。它不包含历史沪深 300 成分股名单和多股组合构建，所以目前只是可复用因子，不是完整策略。
+
+## 启动和数据
 
 ```bash
-# macOS / Linux
-git clone https://github.com/charlesyzk/kelly-mvp.git
-cd kelly-mvp
 python3 -m pip install -e .
 python3 run_web.py
 ```
 
-```powershell
-# Windows
-git clone https://github.com/charlesyzk/kelly-mvp.git
-cd kelly-mvp
-py -m pip install -e .
-py run_web.py
-```
+浏览器打开 `http://127.0.0.1:8765`。CSV 格式为 `date,symbol,adjusted_close`。正式研究优先用直接的日、周、月行情；Excel 工作簿分别使用 `daily`、`weekly`、`monthly` 三张表。日线 CSV 聚合的周/月数据只用于兼容和交叉核验。
 
-打开 `http://127.0.0.1:8765`；结束时按 `Ctrl+C`。
+EODHD Token 放进服务端环境变量 `EODHD_API_TOKEN`，不要写进源码或浏览器。调用供应商接口会消耗额度。
 
-## 数据怎么给
+## 本地行情清单和管理
 
-- 合成演示只用于确认页面正常，会明确标识为合成数据。
-- 日线 CSV 可验证调用链；仓库有公开真实测试数据 `test/DEXUSEU_FRED.csv`。
-- 正式研究使用 EODHD 或 Excel 提供日、周、月序列。
+研究页面右上角“行情管理”可导入五份代码清单、查看本地 SQLite 行情覆盖、按额度分批获取日/周/月数据，也可按清单和交易所筛选并导出 CSV。研究页可选清单代码，优先用本地数据，缺少频率时再创建补数任务。数据库默认在 `data/market_data.sqlite3`，不会提交到 Git，请自行备份。命令行可用 `kelly-market-data import-universes`、`kelly-market-data status` 和 `kelly-market-data fetch --collection sp500 --batch-size 30`。
 
-EODHD 会分别请求供应商日/周/月，不再只拿日线后冒充三频。Excel 建立 `daily`、`weekly`、`monthly` 三张表，每张都是 `date | symbol | adjusted_close`，可直接拖入网页。只有日线 CSV 时，程序仍可保守聚合周/月用于演示和交叉核验。
+首次拉取通过整段历史请求识别最早可用日期，不额外花额度探测；增量更新回退45天重叠。任务按额度串行运行，额度不足或限速会暂停，可续跑和重试。NASDAQ Composite 是重构候选清单，非官方精确名单；部分全球指数代码仍待验证。当前成分股快照用于历史研究会有幸存者偏差。
 
-EODHD 环境变量：
-
-```bash
-# macOS / Linux / Git Bash
-export EODHD_API_TOKEN="你的Token"
-```
-
-```powershell
-# Windows PowerShell
-$env:EODHD_API_TOKEN="你的Token"
-```
-
-```bat
-rem Windows CMD / Anaconda Prompt；这里不支持 export
-set "EODHD_API_TOKEN=你的Token"
-```
-
-Token 不要写进代码、截图或聊天；浏览器与输出文件不会得到 Token。
-
-## 本地行情库和清单选择
-
-研究台右上角“行情管理”可以导入五份 EODHD 代码清单、查看本地 SQLite 行情覆盖，并按额度分批获取日/周/月全历史。管理页和研究页都可按交易所后缀筛选；管理页可导出筛选后的完整清单 CSV。研究页面可从清单中选一个或多个代码；优先读本地库，缺少频率时再补拉。数据库默认在 `data/market_data.sqlite3`，不会提交到 Git，记得自行备份。
-
-首次获取用整段历史请求同时确认每个代码/频率的最早返回日期，不另花额度做日期探测。程序先按交易所后缀批量检查代码，再分批拉取；增量更新重叠最近45天，可暂停续跑和重试失败项。Token 只通过 `EODHD_API_TOKEN` 环境变量使用，管理页显示额度和任务状态。
-
-NASDAQ Composite 页面采用公开重构候选清单，不是官方精确成分名单；全球指数中的 `WISGP.INDX`、`BVSP.INDX` 仍待验证。当前成分股快照用于历史回测时存在幸存者偏差风险。
-
-## κ 按钮和三类仓位
-
-页面可选 κ=0.50、0.80、0.95，也能用滑杆，默认 0.80。κ 控制 `SAFE` 安全余量，越小通常越保守。选择后系统会按每个滚动窗口自动重算，但不会遍历 κ 并挑历史收益最高的值；改 κ 就是新研究设定，应单独保存结果。
-
-- `RAW`：模型的有限原始候选，没有就留空；
-- `BOUNDED`：直接在 −100% 到 +100% 内求最优；
-- `SAFE`：再限制到 Taylor 收敛安全域。
-
-页面可按六个模型、三类仓位和频率筛选。可以查看策略与买入持有净值、目标仓位、操作变动和可分页的逐笔买卖操作。买入持有会与当前频率策略从同一天开始统计；日、周、月的起止日期可能不同，所以三者累计收益不应直接横向比较。
-
-逐笔操作会区分开多、加多、减多、平多、开空、加空、减空、平空和反手。没有仓位变化的日期不会凑成一笔交易；最新仓位发生变化但还没有下一期结果时显示“待验证”。这些都是模型目标仓位变化，不是券商成交单，没有虚构股数、成交价和订单状态。`RAW` 可能越过边界或缺失，只用于研究；页面默认显示 `SAFE`。
-
-## 当前规则
-
-- 模型：`M2_LOG`、`M3_LOG`、`M4_LOG_ZERO`、`M4_SIMPLE`、`M4_LOG_MEAN`、`EMPIRICAL_EXACT`；
-- 日/周/月窗口为 252/104/60 个收益；仓位边界为 −100% 到 +100%；
-- 当前不乘 Half Kelly、不做 70/30 切分、不扣交易成本；
-- 最新窗口作为 `pending` 信号保留，没有未来收益前不进入统计；
-- 正式结论还要通过固定 Bootstrap、FDR、最低样本数及买入持有对照，不能只看准确率或一次盈利。
-
-输入价格先计算普通简单收益，同时构造对数收益供不同模型使用。Kelly 本身不预测未来，只能基于历史窗口对未来分布的估计决定投多少。
-
-## 命令行、命名和输出
+命令行示例：
 
 ```bash
 PYTHONPATH=src python3 -m kelly_mvp \
-  --eodhd-symbol AAPL.US --eodhd-from 2010-01-01 \
-  --kappa 0.8 --output outputs/AAPL_k080_20260907
+  --input /absolute/path/to/prices.xlsx \
+  --output outputs/study_20261005
 ```
 
-```bash
-PYTHONPATH=src python3 -m kelly_mvp \
-  --input /absolute/path/to/prices.xlsx --kappa 0.8 \
-  --output outputs/excel_k080_20260907
-```
+运行结果包括摘要、逐期数据、信号、模拟仓位变动、统计比较、Excel 汇总和结论文本。模拟调仓只是目标仓位变化的解释，不是券商成交回报。
 
-目录建议命名为 `{标的或来源}_k{κ×100三位数}_{日期}`。输出为 `summary.csv`、`periods.csv`、`signals.csv`、`trades.csv`、`statistics.csv`、`results.xlsx`、`conclusion.txt`。逐期和信号文件还包含十二个滚动矩、目标值和求解状态，方便直接复算仓位来源。
-
-本轮相对旧版：从单模型改成六模型，窗口改为 252/104/60，删除 Half Kelly、仓位类型 `FRACTIONAL / TRADE` 和 70/30，改用 `RAW / BOUNDED / SAFE`，加入 κ、EODHD 三频、Excel 三频、pending、破产口径、Bootstrap/FDR 和新报告。模拟交易流水 `trades.csv` 与仓位类型 `TRADE` 不是同一个概念：前者已恢复，用来解释目标仓位变化；后者仍按新研究口径删除。旧结果不能直接当作当前结果继续使用。
-
-研究结果不构成投资建议；滑点、融资融券、税费和真实成交约束仍未完整建模。
+研究结果不构成投资建议，也不能代替完整的交易成本、成交能力和实盘验证。

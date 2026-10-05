@@ -30,6 +30,7 @@ class ComparisonResult:
     supported_at_05: bool
     exploratory_at_10: bool
     reason: str
+    stop_variant: str = "WITHOUT_STOP"
 
     def as_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -112,16 +113,17 @@ def _bh(
 
 def compare_models(result: BacktestResult, config: StrategyConfig | None = None) -> tuple[ComparisonResult, ...]:
     active = config or StrategyConfig()
-    groups: dict[tuple[str, str, str, str], list[PeriodResult]] = {}
+    groups: dict[tuple[str, str, str, str, str], list[PeriodResult]] = {}
     for row in result.periods:
-        groups.setdefault((row.symbol, row.frequency, row.model_id, row.position_type), []).append(row)
+        groups.setdefault((row.symbol, row.frequency, row.model_id, row.position_type, row.stop_variant), []).append(row)
     raw_rows: list[ComparisonResult] = []
-    for (symbol, frequency, model_id, position_type), rows in sorted(groups.items()):
-        if model_id == "M2_LOG":
+    for (symbol, frequency, model_id, position_type, stop_variant), rows in sorted(groups.items()):
+        if model_id in {"M2_LOG", "EWMA_M2_LOG"}:
             continue
+        baseline_id = "EWMA_M2_LOG" if model_id.startswith("EWMA_") else "M2_LOG"
         baseline = {
             (row.signal_date, row.return_date): row
-            for row in groups.get((symbol, frequency, "M2_LOG", position_type), ())
+            for row in groups.get((symbol, frequency, baseline_id, position_type, stop_variant), ())
         }
         differences: list[float] = []
         buy_differences: list[float] = []
@@ -147,16 +149,18 @@ def compare_models(result: BacktestResult, config: StrategyConfig | None = None)
             mean_growth, mean_diff, p if eligible else None, None,
             mean_buy, lower_buy, upper_buy, False, False,
             "pending_fdr" if eligible else "insufficient_sample",
+            stop_variant,
         ))
 
     final: list[ComparisonResult] = []
-    for model_id in MODEL_IDS[1:]:
+    for model_id in (item for item in MODEL_IDS if item not in {"M2_LOG", "EWMA_M2_LOG"}):
         for position_type in POSITION_TYPES:
-            family = [row for row in raw_rows if row.model_id == model_id and row.position_type == position_type]
-            final.extend(_bh(
-                family,
-                formal_level=active.formal_fdr,
-                exploratory_level=active.exploratory_fdr,
-                formal_family_size=18,
-            ))
-    return tuple(sorted(final, key=lambda row: (row.symbol, row.frequency, row.model_id, row.position_type)))
+            for stop_variant in ("WITHOUT_STOP", "WITH_STOP"):
+                family = [row for row in raw_rows if row.model_id == model_id and row.position_type == position_type and row.stop_variant == stop_variant]
+                final.extend(_bh(
+                    family,
+                    formal_level=active.formal_fdr,
+                    exploratory_level=active.exploratory_fdr,
+                    formal_family_size=18,
+                ))
+    return tuple(sorted(final, key=lambda row: (row.symbol, row.frequency, row.model_id, row.position_type, row.stop_variant)))

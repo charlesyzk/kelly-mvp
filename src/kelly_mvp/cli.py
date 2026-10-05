@@ -18,7 +18,7 @@ from .report import write_outputs
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Six-model rolling Kelly research validation")
+    parser = argparse.ArgumentParser(description="Kelly 2.0 rolling research validation")
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--input", help="daily CSV or XLSX with daily/weekly/monthly sheets")
     source.add_argument("--eodhd-symbol", help="download provider daily/weekly/monthly prices")
@@ -30,7 +30,6 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--eodhd-to", help="EODHD end date; defaults to today")
     parser.add_argument("--output", required=True, help="new output directory")
     parser.add_argument("--config", help="optional JSON configuration")
-    parser.add_argument("--kappa", type=float, help="override the pre-registered SAFE parameter")
     parser.add_argument("--strategy-file", help="trusted Python strategy implementing the upload template")
     return parser
 
@@ -39,8 +38,6 @@ def _config(args: argparse.Namespace) -> StrategyConfig:
     values: dict[str, object] = {}
     if args.config:
         values = json.loads(Path(args.config).read_text(encoding="utf-8"))
-    if args.kappa is not None:
-        values["convergence_kappa"] = args.kappa
     return StrategyConfig(**values)
 
 
@@ -127,7 +124,11 @@ def main(argv: list[str] | None = None) -> int:
         for issue in result.issues:
             print(f"- {issue}")
         return 2
-    paths = write_outputs(result, args.output, config)
+    try:
+        paths = write_outputs(result, args.output, config)
+    except (OSError, ValueError) as exc:
+        print(f"Output error: {exc}")
+        return 2
     print(f"Completed: {len(result.periods)} period evaluations")
     for path in paths:
         print(path.resolve())

@@ -98,14 +98,6 @@ button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-v
 .field-grid input { width: 100%; border: 1px solid #506275; color: white; background: #213347; padding: 0 10px; border-radius: 0; }
 .fixed-rule { margin: 18px 0; display: flex; justify-content: space-between; color: #9facb9; font-size: 11px; }
 .fixed-rule strong { color: white; }
-.kappa-control { margin: 18px 0 12px; padding: 15px; border: 1px solid #506275; background: rgba(255,255,255,.035); }
-.kappa-control > div:first-child { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; color: #bcc7d1; font-size: 11px; }
-.kappa-control strong { color: #8eb1ff; font: 700 20px Menlo, monospace; }
-.kappa-control input[type="range"] { width: 100%; margin: 13px 0 9px; accent-color: #8eb1ff; }
-.kappa-control small { display: block; margin-top: 9px; color: #94a3b1; font-size: 9px; line-height: 1.5; }
-.kappa-presets { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; }
-.kappa-presets button { min-height: 32px; border: 1px solid #506275; background: #213347; color: #bcc7d1; cursor: pointer; font-size: 9px; }
-.kappa-presets button.active { border-color: #8eb1ff; background: #8eb1ff; color: #172638; }
 .run-button { width: 100%; border: 0; padding: 0 18px; display: flex; justify-content: space-between; align-items: center; background: var(--copper); color: white; cursor: pointer; font-weight: 700; }
 .run-button:hover:not(:disabled) { background: #bd5822; }
 .run-button:disabled { opacity: .42; cursor: not-allowed; }
