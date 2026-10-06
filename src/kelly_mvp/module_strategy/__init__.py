@@ -12,6 +12,12 @@ from .opening_gap_filter import (
     OpeningGapFilterConfig,
     compute_opening_gap_filter,
 )
+from .ewma_refresh_strategy import (
+    EWMARefreshConfig,
+    EWMARefreshResult,
+    compute_ewma_features,
+    run_ewma_refresh_backtest,
+)
 from .loader import load_user_strategy
 
 
@@ -36,6 +42,10 @@ __all__ = [
     "mark_state_events",
     "OpeningGapFilterConfig",
     "compute_opening_gap_filter",
+    "EWMARefreshConfig",
+    "EWMARefreshResult",
+    "compute_ewma_features",
+    "run_ewma_refresh_backtest",
     "StrategyContext",
     "StrategyDecision",
     "StrategyDefinition",

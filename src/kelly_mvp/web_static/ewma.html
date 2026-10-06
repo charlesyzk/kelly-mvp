@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>A股 EWMA 策略研究</title><link rel="stylesheet" href="/ewma.css">
+</head>
+<body>
+  <header class="topbar"><a href="/">策略研究台</a><span>独立顶层策略 · 不使用 Kelly 仓位契约</span></header>
+  <main>
+    <section class="intro"><p class="eyebrow">A-SHARE · DAILY · λ = 0.9</p><h1>EWMA 状态与账户研究</h1>
+      <p>按现行 31 步规则运行收盘信号、次日开盘入场、A/B/C 退出和探索审批。输入只在本机计算，不会请求行情服务。</p></section>
+    <section class="panel">
+      <label class="file"><strong>选择日线 CSV</strong><input id="input" type="file" accept=".csv,text/csv"><span id="filename">需要 date,symbol,adjusted_close,open,high,low,close</span></label>
+      <p class="note">仅接受一个沪深 A 股代码（.SHG 或 .SHE）。价格必须含完整 OHLC；复权因子以当日收盘价 / 原始收盘价统一到复权 OHLC。核实涨跌停可额外提供 adjusted_limit_up、adjusted_limit_down、price_limits_verified。</p>
+      <button id="run" disabled>运行独立 EWMA</button><p id="status" role="status"></p>
+    </section>
+    <section id="results" hidden>
+      <div class="section-head"><div><p class="eyebrow">RUN SUMMARY</p><h2 id="title"></h2></div><button id="download">下载完整审计 JSON</button></div>
+      <p id="split" class="note"></p><div id="warnings" class="warnings"></div>
+      <h3>事件条件统计（可重叠，不是账户收益）</h3><div class="table-wrap"><table><thead><tr><th>状态</th><th>退出</th><th>完整事件数</th><th>均值</th><th>中位数</th><th>盈利率</th><th>5% CVaR</th></tr></thead><tbody id="events"></tbody></table></div>
+      <h3>固定持有期条件统计（次日开盘入场，K 日标签）</h3><div class="table-wrap"><table><thead><tr><th>状态</th><th>期限</th><th>完整事件</th><th>平均对数收益</th><th>中位净收益</th><th>净盈利率</th><th>5% CVaR</th></tr></thead><tbody id="horizons"></tbody></table></div>
+      <h3>账户结果（刷新审批 × A/B/C；固定初始审批 × A/B/C）</h3><div class="table-wrap"><table><thead><tr><th>账户</th><th>期末权益</th><th>累计收益</th><th>最大回撤</th><th>完整交易</th><th>未完成仓位</th></tr></thead><tbody id="accounts"></tbody></table></div>
+      <h3>审批快照</h3><div class="table-wrap"><table><thead><tr><th>日期</th><th>退出</th><th>状态</th><th>评价 / 匹配</th><th>探索准入</th><th>统计验证</th><th>主区块 CVaR LCB</th><th>126 日敏感性</th></tr></thead><tbody id="approvals"></tbody></table></div>
+      <p class="note">“探索准入”是第 25 步的探索门槛；只有严格参考条件与 15 候选 Holm 同时通过才标为统计验证。事件结果可能重叠，只有账户账本表示资金受空仓约束的逐日净值。</p>
+    </section>
+  </main>
+  <script src="/ewma.js"></script>
+</body>
+</html>

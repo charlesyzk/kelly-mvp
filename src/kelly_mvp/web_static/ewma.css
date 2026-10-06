@@ -1,0 +1,75 @@
+:root {
+  color-scheme: light;
+  --canvas: #e8edeb;
+  --paper: #fbfcfa;
+  --ink: #1a292d;
+  --muted: #637276;
+  --line: #cbd5d1;
+  --green: #236a59;
+  --signal: #c9df62;
+  --copper: #b76243;
+  font-family: "Inter", "Avenir Next", "PingFang SC", "Microsoft YaHei", sans-serif;
+  color: var(--ink);
+  background: var(--canvas);
+  font-synthesis: none;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: radial-gradient(ellipse at 85% -18%, rgba(201,223,98,.2), transparent 34%), var(--canvas);
+}
+button, input { font: inherit; }
+button:focus-visible, input:focus-visible, a:focus-visible { outline: 3px solid rgba(35,106,89,.35); outline-offset: 3px; }
+.topbar {
+  min-height: 66px;
+  padding: 0 max(24px,calc((100vw - 1320px)/2));
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  background: var(--ink);
+  color: var(--paper);
+}
+.topbar a { color: inherit; font-size: 12px; font-weight: 700; text-decoration: none; }
+.topbar span { color: #b7c6c0; font-size: 11px; }
+main { max-width: 1320px; margin: 0 auto; padding: 48px 28px 80px; }
+.intro { max-width: 820px; margin: 0 0 30px; }
+.eyebrow { margin: 0; color: var(--green); font: 700 10px/1.4 Menlo,monospace; letter-spacing: .14em; }
+.intro h1 { margin: 9px 0 12px; font: 600 clamp(34px,5vw,56px)/1.08 "Songti SC","Noto Serif CJK SC",Georgia,serif; letter-spacing: -.04em; }
+.intro > p:last-child { max-width: 740px; margin: 0; color: var(--muted); font-size: 14px; line-height: 1.75; }
+.panel { padding: 24px; border: 1px solid #d4ddda; background: var(--paper); box-shadow: 0 10px 30px rgba(23,44,44,.05); }
+.file { min-height: 128px; padding: 20px; display: grid; align-content: center; gap: 9px; border: 1px dashed #91a69b; background: #f5f8f4; cursor: pointer; }
+.file strong { font-size: 14px; }
+.file input { max-width: 100%; color: var(--muted); font-size: 12px; }
+.file span,.note { color: var(--muted); font-size: 11px; line-height: 1.65; }
+.note { margin: 14px 0; }
+.panel button,.section-head button { min-height: 42px; padding: 0 17px; border: 0; background: var(--ink); color: #faffec; font-size: 11px; font-weight: 700; cursor: pointer; }
+.panel button:hover:not(:disabled),.section-head button:hover { background: #28484b; }
+.panel button:disabled { background: #9ba9a3; cursor: not-allowed; }
+#status { min-height: 22px; margin: 13px 0 0; color: #795e2c; font-size: 11px; }
+#results { margin-top: 42px; }
+.section-head { display: flex; justify-content: space-between; align-items: end; gap: 20px; padding-bottom: 19px; border-bottom: 1px solid var(--line); }
+.section-head h2 { margin: 5px 0 0; font: 600 clamp(24px,3vw,34px)/1.15 "Songti SC","Noto Serif CJK SC",Georgia,serif; }
+h3 { margin: 30px 0 11px; font-size: 14px; }
+.table-wrap { overflow: auto; border: 1px solid var(--line); background: var(--paper); }
+table { width: 100%; border-collapse: collapse; white-space: nowrap; font-size: 10px; }
+th,td { padding: 11px 12px; border-bottom: 1px solid #e5ebe7; text-align: right; }
+th:first-child,td:first-child { text-align: left; }
+th { background: #f1f5f1; color: var(--muted); font-size: 9px; font-weight: 700; }
+tbody tr:last-child td { border-bottom: 0; }
+tbody tr:hover { background: #f7f9f6; }
+.pill { font-weight: 700; }
+.good { color: var(--green); }
+.muted { color: #788580; }
+.warnings { margin-top: 18px; padding: 13px 15px; border-left: 3px solid #bd8b3b; background: #faf4e7; color: #68552f; font-size: 10px; line-height: 1.65; }
+.warnings p { margin: 4px 0; }
+@media(max-width:700px) {
+  .topbar { min-height: 58px; padding: 0 17px; align-items: flex-start; justify-content: center; flex-direction: column; gap: 4px; }
+  .topbar span { font-size: 10px; }
+  main { padding: 32px 16px 58px; }
+  .panel { padding: 17px; }
+  .section-head { align-items: flex-start; flex-direction: column; }
+  .section-head button { width: 100%; }
+}
+@media(prefers-reduced-motion:reduce) { *,*::before,*::after { scroll-behavior: auto !important; transition-duration: .01ms !important; } }

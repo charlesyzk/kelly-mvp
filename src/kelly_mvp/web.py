@@ -24,6 +24,7 @@ from .demo import generate_demo_csv
 from .eodhd import fetch_account_usage, fetch_price_bundle
 from .market_jobs import create_fetch_job, launch_fetch_job, pause_fetch_job, resume_fetch_job
 from .market_store import MarketStore
+from .module_strategy.ewma_refresh_strategy import STRATEGY_ID as EWMA_REFRESH_STRATEGY_ID, run_ewma_refresh_backtest
 from .universes import fetch_universe_definitions, import_universes
 from .module_strategy import (
     KELLY_STRATEGY_ID,
@@ -72,6 +73,15 @@ def calculate_payload(payload: dict[str, Any]) -> dict[str, Any]:
     return _calculate_prices(prices, payload)
 
 
+def ewma_refresh_payload(payload: dict[str, Any]) -> dict[str, object]:
+    """Run the independent EWMA account simulator from an OHLC CSV upload."""
+    csv_text = payload.get("csv_text")
+    if not isinstance(csv_text, str):
+        raise ValueError("请上传含日线 OHLC 的 CSV 文件")
+    prices = parse_daily_prices(csv_text)
+    return run_ewma_refresh_backtest(prices).public_dict()
+
+
 def _calculate_prices(prices: dict[str, list[Any]] | list[Any], payload: dict[str, Any]) -> dict[str, Any]:
     config = StrategyConfig()
     strategy_id = payload.get("strategy_id", KELLY_STRATEGY_ID)
@@ -113,7 +123,20 @@ def _calculate_prices(prices: dict[str, list[Any]] | list[Any], payload: dict[st
 
 
 def strategy_catalog_payload() -> dict[str, object]:
-    return {"strategies": strategy_catalog()}
+    return {
+        "strategies": strategy_catalog(),
+        "independent_strategies": [{
+            "id": EWMA_REFRESH_STRATEGY_ID,
+            "name": "独立 A 股 EWMA 状态与账户策略",
+            "kind": "independent_account_strategy",
+            "selection_id": "EWMA_A_SHARE_REFRESH",
+            "frequency": "daily",
+            "input": "single_symbol_ohlc_csv",
+            "execution_contract": "next_open_t_plus_one_account_ledger",
+            "position_contract": "fixed_10_percent_investment",
+            "kelly_position_types": [],
+        }],
+    }
 
 
 def fetch_eodhd_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -270,10 +293,13 @@ class KellyRequestHandler(BaseHTTPRequestHandler):
         routes = {
             "/": ("index.html", "text/html; charset=utf-8"),
             "/data": ("data.html", "text/html; charset=utf-8"),
+            "/ewma": ("ewma.html", "text/html; charset=utf-8"),
             "/styles.css": ("styles.css", "text/css; charset=utf-8"),
             "/app.js": ("app.js", "text/javascript; charset=utf-8"),
             "/data.js": ("data.js", "text/javascript; charset=utf-8"),
             "/data.css": ("data.css", "text/css; charset=utf-8"),
+            "/ewma.js": ("ewma.js", "text/javascript; charset=utf-8"),
+            "/ewma.css": ("ewma.css", "text/css; charset=utf-8"),
         }
         if path == "/api/eodhd/status":
             self._send_json(
@@ -342,6 +368,7 @@ class KellyRequestHandler(BaseHTTPRequestHandler):
         path = urlsplit(self.path).path
         handlers = {
             "/api/backtest": calculate_payload,
+            "/api/ewma/backtest": ewma_refresh_payload,
             "/api/eodhd/prices": fetch_eodhd_payload,
             "/api/market-data/backtest": research_market_payload,
         }

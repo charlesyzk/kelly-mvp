@@ -11,3 +11,22 @@
 @media(max-width:900px){.data-header{padding:24px 18px;grid-template-columns:1fr auto}.data-header>a{grid-column:1/-1}.data-main{padding:0 18px 48px}.collection-cards{grid-template-columns:repeat(2,minmax(0,1fr))}.fetch-config{grid-template-columns:1fr 1fr}.batch-label{grid-column:1/-1}.data-intro{align-items:flex-start;flex-direction:column}}
 @media(max-width:580px){.data-header{grid-template-columns:1fr}.state-pill{width:fit-content}.panel-card,.data-intro{padding:18px}.collection-cards,.fetch-config{grid-template-columns:1fr}.batch-label{grid-column:auto}.job-row{grid-template-columns:1fr auto}.job-message{grid-column:1/-1}.inventory-tools{flex-wrap:wrap}.inventory-tools input{flex-basis:100%}.job-buttons{grid-column:1/-1}}
 @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
+
+.data-header,.data-main { max-width:1520px; }
+.data-header { padding:34px 56px 22px; grid-template-columns:130px minmax(0,1fr) auto; }
+.data-header>a { color:var(--teal); text-decoration-thickness:1px; text-underline-offset:3px; }
+.data-header h1 { font-family:"Songti SC","Noto Serif CJK SC",Georgia,serif; font-weight:600; }
+.data-intro,.panel-card { border:1px solid #d4ddda; box-shadow:0 7px 26px rgba(23,44,44,.045); }
+.data-intro { background:var(--ink); }
+.data-intro .eyebrow { color:var(--signal); }
+.data-intro h2,.section-title h2 { font-family:"Songti SC","Noto Serif CJK SC",Georgia,serif; font-weight:600; letter-spacing:-.025em; }
+.data-intro code { color:#d4e889; }
+.primary-button { background:var(--ink); color:#faffec; }
+.primary-button:hover:not(:disabled) { background:#28484b; }
+.quiet-button { border-color:#bac8c1; }
+.quiet-button:hover:not(:disabled) { background:#edf3ed; }
+.collection-card strong { color:var(--teal); }
+.check-list input { accent-color:var(--teal); }
+.inventory-table th { background:#edf2ee; }
+.state-pill.ready,.quota-chip.ready { border-color:#b5cda7; background:#edf5e7; color:#386846; }
+@media(max-width:900px){.data-header{padding:24px 18px;grid-template-columns:1fr auto}}

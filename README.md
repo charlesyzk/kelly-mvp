@@ -1,11 +1,12 @@
 # 策略研究框架
 
-本项目是可审计的策略研究工具，不会自动下单，也不承诺盈利。当前包含 Kelly 2.0 六模型验证、EWMA 状态事件研究模块，以及用户上传的 Python 研究策略。EWMA 状态研究与 Kelly 内部的 EWMA 加权模型是两件不同的事。
+本项目是可审计的策略研究工具，不会自动下单，也不承诺盈利。当前包含 Kelly 2.0 六模型验证、独立 A 股 EWMA 状态与账户策略，以及用户上传的 Python 研究策略。独立 EWMA 与 Kelly 内部的 EWMA 加权模型是两件不同的事。
 
 ## 策略模块
 
 - `KELLY_SIX_MODEL`：一个顶层模块，内部运行 `M2_LOG`、`M4_LOG_ZERO`、`EMPIRICAL_EXACT` 及其三个 EWMA 加权版本。每个模型分别生成 `RAW / BOUNDED / SAFE`，并报告 `WITHOUT_STOP / WITH_STOP` 两条路径。
 - EWMA 状态事件研究：[`ewma_return_position.py`](src/kelly_mvp/module_strategy/ewma_return_position.py) 提供因果波动率标准化、历史排名、五类状态、首次进入与冷却标记、固定持有期结果、MFE/MAE、分位数和恰好最差 5% 的 CVaR 汇总。它用于检验状态是否含有条件收益信息；不把极端排名解释成方向预测，也不构成已经审批的买卖策略。
+- 独立 A 股 EWMA 顶层策略：[`ewma_refresh_strategy.py`](src/kelly_mvp/module_strategy/ewma_refresh_strategy.py) 按规则手册第一部分实现日对数收益、一次性 60 日样本方差初始化、λ=0.9 递推、严格过去排名、状态冷却、因果 a/b 校准、A/B/C 退出、63 日探索审批与 T+1 账户账本。它不经过 Kelly 的 `run_backtest()`，不生成 `RAW / BOUNDED / SAFE`，也不改变上传策略。
 - 集合竞价材料中可复用的单股因子：[`opening_gap_filter.py`](src/kelly_mvp/module_strategy/opening_gap_filter.py) 统计前 30 个已完成交易日里，复权开盘价高于前一日复权收盘价的次数，默认不少于 10 次时标记为 eligible。信号日自身不计入，缺 OHLC 时返回不可用。该因子不含沪深 300 历史成分股，也不做跨股票排序或组合资金分配。
 - 用户策略：网页或命令行可运行可信 Python 策略，只输出 `TARGET`；当前无 Python 沙箱，请勿上传来源不明代码。
 
@@ -65,7 +66,17 @@ Token 仅通过服务端环境变量 `EODHD_API_TOKEN` 提供，不进入源码�
 
 Kelly 运行写出 `summary.csv`、`periods.csv`、`signals.csv`、`trades.csv`、`statistics.csv`、`results.xlsx` 和 `conclusion.txt`。止损版本是结果主键的一部分。调仓流水只解释目标仓位变化，不是券商成交单；pending 信号不进入收益和准确率统计。
 
-EWMA 事件研究由 `compute_ewma_rank_features()`、`mark_state_events()` 和 `analyze_ewma_state_events()` 提供 Python API。事件日按收盘后确认，固定期限收益从事件收盘到后续收盘计算；不完整期限保留为 pending。该入口还没有模拟次日开盘入场、A/B/C 退出、T+1、账户审批/再审批或组合资金分配，因此不能把条件统计当作可执行策略回测。
+原有 EWMA 事件研究仍由 `compute_ewma_rank_features()`、`mark_state_events()` 和 `analyze_ewma_state_events()` 提供 Python API，保留收盘到收盘条件统计。独立 A 股 EWMA 已加入主研究页的“顶层策略”选择器，也可通过 `/ewma` 查看完整审计页或使用专属 CLI；它不和 Kelly 共用回测契约：
+
+```bash
+kelly-ewma --input /absolute/path/to/300308.csv --output outputs/ewma-300308-run-001
+```
+
+输入必须是一个 `.SHG` 或 `.SHE` 标的的日线 CSV，列含 `date,symbol,adjusted_close,open,high,low,close`。OHLC 按 `adjusted_close / close` 统一复权。主研究页选择该策略后可直接上传 CSV 并在页面查看账户与审批摘要；完整审计入口 `/ewma` 和 CLI 只读本地文件，不触发行情请求。已有 CLI 输出目录不会覆盖。
+
+输出包括 `run.json` 和特征、事件、固定期限结果、21 日路径、参数校准、A/B/C 退出、审批快照、账户信号、交易及逐日账本 CSV。手册当前采用 60/20/20 切分；验证容量不足 100 时改为三等分。账户包括刷新审批 × A/B/C 和固定初始审批 × A/B/C 共六组，并附同预算买入持有基准。主审批使用非循环 63 交易日区块、10,000 次重采样、种子 `20260906`；126 日仅作敏感性诊断。每 63 日重复审批尚无序贯误差控制保证。事件条件统计可能重叠，不能连乘；账户账本使用 10% 投入比例，往返成本入场时一次计提。探索准入与严格统计验证分别输出，`exploration_allowed` 不能替代 `statistically_validated`。
+
+可选列 `adjusted_limit_up,adjusted_limit_down,price_limits_verified` 提供逐日核实的复权涨跌停价。只有 `price_limits_verified=true` 才会使用；缺少时采用单一价格日的保守代理。当前行情层没有完整停牌、历史 ST、队列、整手和逐笔成交资料。规则手册指出 2024-04-30 至 2024-05-06 的复权价格疑似断点；当前输入尚未附这段的供应商原始报文和公司行动对照，具体缺少原始开高低收、供应商复权收盘、逐日复权因子/算法版本、公司行动生效日期及交易状态字段。引擎不会修复这段价格或推断根因，也不证明价格连续性；正式评价该标的前应先补齐并核对这些资料。
 
 ## 验收
 

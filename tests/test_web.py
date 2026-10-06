@@ -97,8 +97,19 @@ def decide(context):
         self.assertEqual(result["statistics"], [])
 
     def test_strategy_catalog_has_one_kelly_module(self):
-        catalog = strategy_catalog_payload()["strategies"]
+        payload = strategy_catalog_payload()
+        catalog = payload["strategies"]
         self.assertEqual([row["id"] for row in catalog], ["KELLY_SIX_MODEL"])
+        self.assertEqual([row["id"] for row in payload["independent_strategies"]], ["ewma_return_position_refresh_v1"])
+        self.assertEqual(payload["independent_strategies"][0]["kelly_position_types"], [])
+
+    def test_main_research_page_offers_independent_ewma_selection_and_output(self):
+        page = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+        script = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+        self.assertIn('value="EWMA_A_SHARE_REFRESH"', page)
+        self.assertIn('id="ewma-results"', page)
+        self.assertIn('fetch("/api/ewma/backtest"', script)
+        self.assertIn('state.result.strategy_id !== "ewma_return_position_refresh_v1"', script)
 
 
 if __name__ == "__main__":

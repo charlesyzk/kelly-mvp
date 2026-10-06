@@ -17,28 +17,68 @@ function setSource(text, name, series=null, workbookBase64=null) {
 }
 
 function hasPriceSource() { return Boolean(state.csvText || state.workbookBase64 || state.priceSeries || state.marketSymbols.length); }
+function isEwmaStrategy() { return state.strategyId === "EWMA_A_SHARE_REFRESH"; }
 function updateRunAvailability() {
-  runButton.disabled = !hasPriceSource() || (state.strategyId === "uploaded" && !state.strategySource);
+  runButton.disabled = isEwmaStrategy()
+    ? !state.csvText
+    : !hasPriceSource() || (state.strategyId === "uploaded" && !state.strategySource);
 }
 function applyStrategyMode() {
   const uploaded = state.strategyId === "uploaded";
+  const ewma = isEwmaStrategy();
+  document.body.classList.toggle("ewma-mode", ewma);
   $("#strategy-upload").hidden = !uploaded;
-  $("#position-rule").querySelector("span").textContent = uploaded ? "上传策略仓位" : "Kelly 内部仓位";
-  $("#position-rule").querySelector("strong").textContent = uploaded ? "TARGET" : "RAW · BOUNDED · SAFE";
-  $("#strategy-description").textContent = uploaded
+  $("#ewma-input-note").hidden = !ewma;
+  $("#ewma-source-note").hidden = !ewma;
+  $("#source-tabs").hidden = ewma;
+  const activeSource = document.querySelector(".source-tabs button.active")?.dataset.source || "csv";
+  if (ewma) {
+    $("#csv-source").hidden = false;
+    $("#eodhd-source").hidden = true;
+    $("#market-source").hidden = true;
+    $("#file-input").accept = ".csv,text/csv";
+    $("#drop-zone").querySelector("small").textContent = "仅限单只 A 股日线 OHLC CSV；需含 date、symbol、adjusted_close、open、high、low、close。";
+    $("#demo-button").hidden = true;
+  } else {
+    $("#csv-source").hidden = activeSource !== "csv";
+    $("#eodhd-source").hidden = activeSource !== "eodhd";
+    $("#market-source").hidden = activeSource !== "market";
+    $("#file-input").accept = ".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+    $("#drop-zone").querySelector("small").textContent = "正式运行可用 daily / weekly / monthly 三工作表 Excel；日频 CSV 是本地聚合兼容入口。";
+    $("#demo-button").hidden = false;
+  }
+  $("#price-title").textContent = ewma ? "加载 A 股日线 OHLC" : "加载复权价格";
+  $("#position-rule").querySelector("span").textContent = ewma ? "执行规则" : uploaded ? "上传策略仓位" : "Kelly 内部仓位";
+  $("#position-rule").querySelector("strong").textContent = ewma ? "10% · T+1 · A/B/C" : uploaded ? "TARGET" : "RAW · BOUNDED · SAFE";
+  $("#strategy-description").textContent = ewma
+    ? "日线状态事件与独立账户回测；按现行规则评估次日开盘入场、A/B/C 退出与审批。"
+    : uploaded
     ? "按模板上传可信 Python 策略；框架统一完成无前视的下一期验证。"
     : "完整运行六个 Kelly 模型及 RAW、BOUNDED、SAFE 三类独立仓位。";
-  $("#logic-title").textContent = uploaded ? "一个目标仓位，同一套验证链路" : "六个目标函数，三种独立求解";
-  $("#logic-caption").textContent = uploaded
+  $("#logic-title").textContent = ewma ? "历史排名状态，次日开盘入场" : uploaded ? "一个目标仓位，同一套验证链路" : "六个目标函数，三种独立求解";
+  $("#logic-caption").textContent = ewma
+    ? "λ = 0.9 · 固定 K = 5 · 探索准入与统计验证分别报告"
+    : uploaded
     ? "策略只读取当前窗口 · 框架限制仓位 · 下一期结果独立评价"
     : "RAW 看模型原始倾向 · BOUNDED 限制敞口 · SAFE 再限制 Taylor 收敛域";
-  $("#empty-copy").textContent = uploaded
+  $("#ewma-state-key").hidden = !ewma;
+  $("#kelly-method-card").hidden = ewma;
+  $("#ewma-method-card").hidden = !ewma;
+  $("#window-note").textContent = ewma ? "日线 · λ 0.9 · 排名 1,260" : "日 252 · 周 104 · 月 60";
+  $("#empty-copy").textContent = ewma
+    ? "加载单只 A 股日线 OHLC CSV，查看事件条件统计、审批快照与独立权益账本。"
+    : uploaded
     ? "加载策略和行情后，查看 TARGET 仓位的真实逐期计算。"
     : "加载行情后，选择模型、仓位类型和频率查看真实逐期计算。";
-  status.textContent = hasPriceSource()
-    ? uploaded && !state.strategySource ? "行情已加载；请再上传策略文件。" : "行情已加载，尚未计算。"
-    : uploaded ? "先上传策略并加载行情，再运行验证。" : "先加载行情，再运行六模型验证。";
-  runButton.querySelector("span").textContent = uploaded ? "运行上传策略" : "运行 Kelly 2.0";
+  $("#results").hidden = true;
+  $("#ewma-results").hidden = true;
+  $("#empty-state").hidden = false;
+  status.textContent = ewma
+    ? state.csvText ? "OHLC CSV 已加载，可以运行独立 EWMA 策略。" : "请先加载单只 A 股的日线 OHLC CSV。"
+    : hasPriceSource()
+      ? uploaded && !state.strategySource ? "行情已加载；请再上传策略文件。" : "行情已加载，尚未计算。"
+      : uploaded ? "先上传策略并加载行情，再运行验证。" : "先加载行情，再运行六模型验证。";
+  runButton.querySelector("span").textContent = ewma ? "运行 A 股 EWMA" : uploaded ? "运行上传策略" : "运行 Kelly 2.0";
   updateRunAvailability();
 }
 strategySelect.addEventListener("change", () => {
@@ -145,6 +185,9 @@ loadMarketOptions().catch((e) => { $("#market-selection-note").textContent = `�
 async function readFile(file) {
   if (!file) return;
   const lower = file.name.toLowerCase();
+  if (isEwmaStrategy() && !lower.endsWith(".csv")) {
+    status.className = "status error"; status.textContent = "A 股 EWMA 需要单只标的的日线 OHLC CSV。"; return;
+  }
   if (lower.endsWith(".xlsx")) {
     const bytes = new Uint8Array(await file.arrayBuffer());
     let binary = "";
@@ -188,8 +231,17 @@ $("#eodhd-fetch").addEventListener("click", async (event) => {
 
 runButton.addEventListener("click", async () => {
   const uploaded = state.strategyId === "uploaded";
-  runButton.disabled = true; status.className = "status"; status.textContent = uploaded ? "正在运行上传策略…" : "正在运行六模型与三类仓位…";
+  const ewma = isEwmaStrategy();
+  runButton.disabled = true; status.className = "status"; status.textContent = ewma ? "正在运行 EWMA 状态、退出方案与账户审计…" : uploaded ? "正在运行上传策略…" : "正在运行六模型与三类仓位…";
   try {
+    if (ewma) {
+      const response = await fetch("/api/ewma/backtest", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({csv_text:state.csvText})});
+      const data = await response.json(); if (!response.ok) throw new Error(data.error || "EWMA 计算失败");
+      state.result = data; renderEwmaResult(data);
+      $("#empty-state").hidden = true; $("#results").hidden = true; $("#ewma-results").hidden = false;
+      status.textContent = `完成 ${data.symbol}：${data.events.length.toLocaleString("zh-CN")} 个保留事件，${data.approvals.length.toLocaleString("zh-CN")} 条审批记录。`;
+      return;
+    }
     const payload = {strategy_id:state.strategyId};
     if (uploaded) {
       payload.strategy_source = state.strategySource;
@@ -228,7 +280,50 @@ runButton.addEventListener("click", async () => {
       ? `完成 ${data.periods.length.toLocaleString("zh-CN")} 行逐期评价；策略 ${data.strategy.name}。`
       : `完成 ${data.periods.length.toLocaleString("zh-CN")} 行逐期评价；包含止损和无止损两条路径${data.data_source ? `；来源：${data.data_source.source}` : ""}。`;
   } catch (error) { status.className = "status error"; status.textContent = error.message; }
-  finally { updateRunAvailability(); runButton.querySelector("span").textContent = uploaded ? "重新运行上传策略" : "重新运行 Kelly 2.0"; }
+  finally { updateRunAvailability(); runButton.querySelector("span").textContent = isEwmaStrategy() ? "重新运行 A 股 EWMA" : uploaded ? "重新运行上传策略" : "重新运行 Kelly 2.0"; }
+});
+
+function renderEwmaResult(data) {
+  $("#ewma-result-title").textContent = `${data.symbol} · ${data.config.ranking_window.toLocaleString("zh-CN")} 日排名 · 固定 K=${data.config.holding_days}`;
+  $("#ewma-result-caption").textContent = `切分 ${data.split_method} · 测试起点 ${data.test_start_index ?? "—"} · 样本 ${data.input_snapshot.row_count} 日`;
+  const accounts = data.summaries.filter((row) => row.account && row.account !== "PASSIVE_BUY_HOLD");
+  const accountRows = $("#ewma-account-rows"); accountRows.replaceChildren();
+  for (const item of accounts) {
+    const tr = document.createElement("tr");
+    [item.account, Number(item.final_equity).toFixed(5), pct(item.total_return), pct(item.max_drawdown), item.completed_trades, item.unfinished_positions].forEach((value) => addEwmaCell(tr, value));
+    accountRows.append(tr);
+  }
+  const eventRows = $("#ewma-event-rows"); eventRows.replaceChildren();
+  for (const item of data.summaries.filter((row) => row.statistic_type === "overlapping_event_conditional_not_account_return")) {
+    const tr = document.createElement("tr");
+    [item.state, item.exit_policy, item.event_count, pct(item.mean_net_return), pct(item.median_net_return), pct(item.win_rate), pct(item.cvar05_net_return)].forEach((value) => addEwmaCell(tr, value));
+    eventRows.append(tr);
+  }
+  const approvalRows = $("#ewma-approval-rows"); approvalRows.replaceChildren();
+  const latestReview = [...data.approvals].reduce((latest, row) => !latest || row.review_date > latest ? row.review_date : latest, null);
+  for (const item of data.approvals.filter((row) => row.review_date === latestReview)) {
+    const tr = document.createElement("tr");
+    [item.review_date, item.policy, item.state, `${item.evaluation_count} / ${item.matched_count}`, item.exploration_allowed ? "允许探索" : "不允许", item.statistically_validated ? "通过" : "未通过", pct(item.cvar_lcb95)].forEach((value) => addEwmaCell(tr, value));
+    if (item.exploration_allowed) tr.classList.add("exploration-row");
+    approvalRows.append(tr);
+  }
+  const latestExploration = data.approvals.filter((row) => row.review_date === latestReview && row.exploration_allowed).length;
+  const latestValidated = data.approvals.filter((row) => row.review_date === latestReview && row.statistically_validated).length;
+  $("#ewma-metrics").innerHTML = [
+    ["输入标的", data.symbol, "单一沪深 A 股"],
+    ["保留状态事件", data.events.length.toLocaleString("zh-CN"), "事件级条件样本"],
+    ["最近探索准入", latestExploration, "策略可探索，不代表验证通过"],
+    ["最近统计验证", latestValidated, "严格标准与 Holm 检验"],
+  ].map(([label, value, note]) => `<article><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong><small>${escapeHtml(note)}</small></article>`).join("");
+  const issues = $("#ewma-issues"); issues.replaceChildren();
+  for (const message of data.issues || []) { const p = document.createElement("p"); p.textContent = message; issues.append(p); }
+  issues.hidden = !issues.childElementCount;
+}
+function addEwmaCell(row, value) { const cell = document.createElement("td"); cell.textContent = value ?? "—"; row.append(cell); }
+$("#ewma-download").addEventListener("click", () => {
+  if (!state.result || state.result.strategy_id !== "ewma_return_position_refresh_v1") return;
+  const url = URL.createObjectURL(new Blob([JSON.stringify(state.result, null, 2)], {type:"application/json"}));
+  const link = document.createElement("a"); link.href = url; link.download = `${state.result.symbol}_ewma_audit.json`; link.click(); URL.revokeObjectURL(url);
 });
 
 function fillSelect(selector, values) { $(selector).innerHTML = values.map((v) => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join(""); }

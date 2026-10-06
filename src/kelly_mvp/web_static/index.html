@@ -3,24 +3,25 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Kelly 六模型研究台</title>
+  <title>策略研究台</title>
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
   <header class="masthead">
-    <a class="brand" href="#top" aria-label="返回顶部"><span>K</span><i>/</i><strong>6</strong></a>
-    <div class="mast-copy"><p class="eyebrow">六模型 · 三类仓位 · 下一期验证</p><h1>先固定规则，<br>再让结果说话。</h1></div>
+    <a class="brand" href="#top" aria-label="策略研究台"><span>S</span><i>/</i><strong>R</strong></a>
+    <div class="mast-copy"><p class="eyebrow">策略研究 · 可审计 · 本地运行</p><h1>规则先行，<br>证据随后。</h1></div>
     <div class="privacy"><span></span>计算留在本机 · <a href="/data">行情管理</a></div>
   </header>
 
   <main id="top" class="workspace">
     <aside class="control-panel" aria-labelledby="control-title">
-      <div class="panel-heading"><p>运行设置</p><span>日 252 · 周 104 · 月 60</span></div>
+      <div class="panel-heading"><p>运行设置</p><span id="window-note">日 252 · 周 104 · 月 60</span></div>
       <h2 id="control-title">选择策略模块</h2>
       <label class="strategy-picker">
         <span>顶层策略</span>
         <select id="strategy-select">
           <option value="KELLY_SIX_MODEL">Kelly 六模型策略</option>
+          <option value="EWMA_A_SHARE_REFRESH">A 股 EWMA 策略</option>
           <option value="uploaded">上传 Python 策略</option>
         </select>
       </label>
@@ -30,9 +31,14 @@
         <a href="/strategy-template.py" download>下载策略模板</a>
         <small>模板只能看到截至信号日的窗口数据；框架负责下一期评价与审计。</small>
       </div>
+      <div id="ewma-input-note" class="ewma-input-note" hidden>
+        <strong>独立 A 股策略</strong>
+        <p>需要单只沪深股票的日线 OHLC CSV。此策略有独立账户、T+1 与 A/B/C 退出规则。</p>
+        <a href="/ewma">查看规则与完整审计页 ↗</a>
+      </div>
 
-      <h2>加载复权价格</h2>
-      <div class="source-tabs" role="tablist" aria-label="行情来源">
+      <h2 id="price-title">加载复权价格</h2>
+      <div class="source-tabs" id="source-tabs" role="tablist" aria-label="行情来源">
         <button class="active" data-source="csv" type="button">上传 CSV / Excel</button>
         <button data-source="eodhd" type="button">EODHD 三频</button>
         <button data-source="market" type="button">本地清单</button>
@@ -62,6 +68,7 @@
         <div class="market-select-actions"><button type="button" id="market-select-visible">全选当前结果</button><button type="button" id="market-clear-selection">清空</button></div>
         <p id="market-selection-note" class="api-note">选择清单后载入本地已保存代码。缺少分频行情时会创建补数任务。</p>
       </section>
+      <p id="ewma-source-note" class="ewma-source-note" hidden>EWMA 只接受一个标的的 OHLC CSV；请勿使用演示行情、远程行情或多标的清单。</p>
 
       <section class="fixed-rule"><span>EWMA 半衰期</span><strong>日 84 · 周 35 · 月 20</strong></section>
       <div id="position-rule" class="fixed-rule"><span>Kelly 内部仓位</span><strong>RAW · BOUNDED · SAFE</strong></div>
@@ -74,9 +81,24 @@
         <div class="logic-heading"><p>研究契约</p><h2 id="logic-title">六个目标函数，三种独立求解</h2></div>
         <p id="logic-caption" class="logic-caption">RAW 看模型原始倾向 · BOUNDED 限制敞口 · SAFE 再限制 Taylor 收敛域</p>
       </section>
+      <section id="ewma-state-key" class="ewma-state-key" hidden aria-label="EWMA 历史排名状态">
+        <div><span>← 历史排名状态，不代表买卖建议 →</span><b>严格过去 1,260 个有效观察</b></div>
+        <ul><li><i></i><span>极低</span><b>0–5%</b></li><li><i></i><span>偏低</span><b>5–20%</b></li><li><i></i><span>中间</span><b>20–80%</b></li><li><i></i><span>偏高</span><b>80–95%</b></li><li><i></i><span>极高</span><b>95–100%</b></li></ul>
+      </section>
       <section id="empty-state" class="empty-state">
         <div class="empty-orbit"><span>M2</span><span>EWMA</span><span>M4</span><span>EX</span><b>f</b></div>
         <h2>结果会在这里展开</h2><p id="empty-copy">加载行情后，选择模型、仓位类型和频率查看真实逐期计算。</p>
+      </section>
+      <section id="ewma-results" class="ewma-results" hidden>
+        <header class="ewma-result-heading">
+          <div><p class="eyebrow">INDEPENDENT ACCOUNT STUDY</p><h2 id="ewma-result-title"></h2><p id="ewma-result-caption"></p></div>
+          <button id="ewma-download" type="button">下载完整审计 JSON</button>
+        </header>
+        <div id="ewma-metrics" class="ewma-metrics"></div>
+        <section class="ewma-table-card"><header><h3>账户净值结果</h3><p>六个账户分别按 A/B/C 退出与刷新/冻结审批运行；事件统计不计入账户净值。</p></header><div class="table-scroll"><table><thead><tr><th>账户</th><th>期末权益</th><th>累计收益</th><th>最大回撤</th><th>完整交易</th><th>未完成仓位</th></tr></thead><tbody id="ewma-account-rows"></tbody></table></div></section>
+        <section class="ewma-table-card"><header><h3>状态与退出事件统计</h3><p>可能重叠的条件结果，只作事件级统计。</p></header><div class="table-scroll"><table><thead><tr><th>状态</th><th>退出方案</th><th>完整事件</th><th>平均净收益</th><th>中位净收益</th><th>净盈利率</th><th>5% CVaR</th></tr></thead><tbody id="ewma-event-rows"></tbody></table></div></section>
+        <section class="ewma-table-card"><header><h3>最近审批状态</h3><p>探索准入与严格统计验证分开显示。</p></header><div class="table-scroll"><table><thead><tr><th>审批日</th><th>退出方案</th><th>状态</th><th>评价 / 匹配</th><th>探索准入</th><th>统计验证</th><th>CVaR LCB</th></tr></thead><tbody id="ewma-approval-rows"></tbody></table></div></section>
+        <div id="ewma-issues" class="ewma-issues" hidden></div>
       </section>
       <section id="results" class="results" hidden>
         <div class="result-toolbar filter-grid">
@@ -118,7 +140,7 @@
         </div>
         <div id="warnings" class="warnings" hidden></div>
       </section>
-      <details class="method-card">
+      <details id="kelly-method-card" class="method-card">
         <summary><span>计算逻辑</span><b>新研究口径</b></summary>
         <div class="method-grid">
           <article><em>1</em><h3>直接使用分频数据</h3><p>EODHD 分别请求日、周、月；Excel 分别读取 daily、weekly、monthly 工作表。</p></article>
@@ -129,9 +151,20 @@
           <article><em>6</em><h3>正式证据</h3><p>使用循环移动区块 Bootstrap 和分组 BH-FDR；方向准确率只作描述。</p></article>
         </div>
       </details>
+      <details id="ewma-method-card" class="method-card" hidden>
+        <summary><span>A 股 EWMA 现行规则</span><b>独立账户策略</b></summary>
+        <div class="method-grid">
+          <article><em>波动率</em><h3>只初始化一次</h3><p>60 日样本方差作为种子，之后使用 λ=0.9 递推；当日标准化分母与次日入场尺度分开保存。</p></article>
+          <article><em>状态</em><h3>严格过去排名</h3><p>原始收益和标准化收益分别对过去 1,260 个有效观察排名；同状态事件保留 5 个交易日冷却。</p></article>
+          <article><em>参数</em><h3>成熟事件才校准</h3><p>固定 K=5；a 至少需要 60 个成熟事件，b 至少需要 30 个固定期限净盈利事件。</p></article>
+          <article><em>退出</em><h3>A / B / C 同时保留</h3><p>按保守日线顺序处理开盘跳空、盘中双触及、T+1 与未成交退出；不按同轮结果淘汰方案。</p></article>
+          <article><em>审批</em><h3>每 63 个输入日刷新</h3><p>探索准入和严格统计验证分别记录；探索允许不表示统计验证通过。</p></article>
+          <article><em>账户</em><h3>10% 固定投入</h3><p>往返成本按一次往返计提。重叠事件条件收益与逐日权益账本分开，事件收益不连乘。</p></article>
+        </div>
+      </details>
     </section>
   </main>
-  <footer>研究结果不构成投资建议 · 当前不计交易成本</footer>
+  <footer>研究结果不构成投资建议 · Kelly 研究口径不计交易成本；EWMA 使用固定往返成本假设</footer>
   <script src="/app.js"></script>
 </body>
 </html>

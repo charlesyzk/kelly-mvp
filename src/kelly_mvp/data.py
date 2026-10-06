@@ -34,6 +34,9 @@ class PriceRow:
     volume: float | None = None
     trading_status: str | None = None
     adjustment_factor: float | None = None
+    adjusted_limit_up: float | None = None
+    adjusted_limit_down: float | None = None
+    price_limits_verified: bool = False
 
 
 def _parse_rows(handle: Iterable[str]) -> list[PriceRow]:
@@ -70,6 +73,8 @@ def _parse_rows(handle: Iterable[str]) -> list[PriceRow]:
                 volume = float(raw["volume"]) if raw.get("volume", "").strip() else None
             except (TypeError, ValueError) as exc:
                 raise ValueError(f"invalid OHLCV at line {line_number}") from exc
+            if volume is not None and (not isfinite(volume) or volume < 0):
+                raise ValueError(f"volume must be finite and non-negative at line {line_number}")
             if not all(isfinite(value) and value > 0 for value in (raw_open, raw_high, raw_low, raw_close)):
                 raise ValueError(f"OHLC prices must be finite and positive at line {line_number}")
             if not raw_low <= min(raw_open, raw_close) <= max(raw_open, raw_close) <= raw_high:
@@ -87,6 +92,24 @@ def _parse_rows(handle: Iterable[str]) -> list[PriceRow]:
                 "trading_status": raw.get("trading_status") or raw.get("status") or None,
                 "adjustment_factor": factor,
             }
+        limit_fields = {"adjusted_limit_up", "adjusted_limit_down", "price_limits_verified"}
+        supplied_limits = limit_fields.intersection(reader.fieldnames or ())
+        if supplied_limits and supplied_limits != limit_fields:
+            raise ValueError("verified price limits require adjusted_limit_up, adjusted_limit_down and price_limits_verified")
+        if supplied_limits:
+            try:
+                limit_up = float(raw["adjusted_limit_up"])
+                limit_down = float(raw["adjusted_limit_down"])
+                verified_text = raw["price_limits_verified"].strip().lower()
+                verified = verified_text in {"1", "true", "yes", "verified"}
+                if verified_text not in {"1", "true", "yes", "verified", "0", "false", "no", ""}:
+                    raise ValueError("invalid verification marker")
+            except (TypeError, ValueError, AttributeError) as exc:
+                raise ValueError(f"invalid verified price limits at line {line_number}") from exc
+            if not (isfinite(limit_up) and isfinite(limit_down) and limit_up > 0 and limit_down > 0 and limit_down <= limit_up):
+                raise ValueError(f"invalid verified price limits at line {line_number}")
+            kwargs.update({"adjusted_limit_up": limit_up, "adjusted_limit_down": limit_down,
+                           "price_limits_verified": verified})
         rows.append(PriceRow(observed, symbol, close, **kwargs))
     if not rows:
         raise ValueError("input CSV contains no data rows")
